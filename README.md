@@ -27,12 +27,23 @@ Convide o bot com o scope `bot applications.commands` e permissão de Administra
 |---|---|
 | Moderação | `/ban` `/kick` `/mute` `/warn` `/warnings` `/clear` |
 | Tickets | `/ticket-panel` `/ticket-add-category` `/ticket-remove-category` `/ticket-stats` |
-| Sorteios | `/giveaway-start` `/giveaway-reroll` |
+| Sorteios | `/giveaway-start` `/giveaway-end` `/giveaway-stop` `/giveaway-reroll` |
 | Cargos | `/setup-autorole` `/reactionrole-setup` |
 | Utilidade | `/say` `/embed` `/nuke` |
 | Configuração | `/setup-welcome` `/setup-logs` `/setup-ticket-logs` `/setup-verify` `/pull-user` |
 
 `/nuke confirmar:true` clona o canal atual (nome, tópico, NSFW, slowmode, categoria, posição e todas as permissões), apaga o original e registra a ação nos logs. É irreversível: as mensagens não são recuperáveis.
+
+## Sorteios
+
+`/giveaway-start premio:"Nitro" duracao:1h vencedores:1` publica o sorteio com o botão **🎉 Participar**. Ao vencer o prazo, uma varredura periódica encerra e anuncia automaticamente.
+
+Para agir antes do prazo, `/giveaway-end` e `/giveaway-stop` têm autocomplete: ao digitar, o Discord lista os sorteios **em andamento** do servidor no formato `#id — prêmio (N participantes)`.
+
+- `/giveaway-end giveaway:<sorteio>` — encerra na hora: sorteia, edita a mensagem original e anuncia o(s) vencedor(es) no canal do sorteio.
+- `/giveaway-stop giveaway:<sorteio>` — **cancela** o sorteio. Nenhum vencedor é sorteado nem revelado; a mensagem passa a exibir o aviso de cancelamento, o botão de participação é removido e a ação vai para o canal de logs. Um sorteio cancelado não pode ser encerrado nem sofrer `/giveaway-reroll` depois.
+
+`/giveaway-reroll id:<id> quantidade:<n>` sorteia novos vencedores de um sorteio já encerrado normalmente.
 
 ## Fluxo de tickets
 

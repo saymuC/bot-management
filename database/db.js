@@ -72,7 +72,9 @@ CREATE TABLE IF NOT EXISTS giveaways (
   winners_count INTEGER DEFAULT 1,
   host_id TEXT,
   ends_at TEXT NOT NULL,
-  ended INTEGER DEFAULT 0
+  ended INTEGER DEFAULT 0,
+  cancelled INTEGER DEFAULT 0,
+  cancelled_by TEXT
 );
 
 CREATE TABLE IF NOT EXISTS giveaway_entries (
@@ -112,6 +114,8 @@ function ensureColumn(table, column, definition) {
 ensureColumn('guild_config', 'ticket_log_channel_id', 'TEXT');
 ensureColumn('tickets', 'claimed_at', 'TEXT');
 ensureColumn('tickets', 'closed_by', 'TEXT');
+ensureColumn('giveaways', 'cancelled', 'INTEGER DEFAULT 0');
+ensureColumn('giveaways', 'cancelled_by', 'TEXT');
 
 // ---- guild_config ----
 const upsertConfigField = (field) =>

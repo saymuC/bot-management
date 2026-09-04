@@ -29,6 +29,12 @@ module.exports = {
     if (!giveaway.ended) {
       return respond(interaction, { embeds: [errorEmbed('Este sorteio ainda está em andamento.')] });
     }
+    // Um sorteio cancelado nunca teve vencedor; sortear agora contrariaria o /giveaway-stop.
+    if (giveaway.cancelled) {
+      return respond(interaction, {
+        embeds: [errorEmbed('Este sorteio foi cancelado, então não há vencedores a sortear.')],
+      });
+    }
 
     const winners = pickWinners(giveaway.id, count);
     if (!winners.length) {

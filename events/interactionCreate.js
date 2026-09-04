@@ -67,6 +67,15 @@ module.exports = {
   name: Events.InteractionCreate,
   async execute(interaction, client) {
     try {
+      // ---- Autocomplete ----
+      // Precisa vir antes do defer: autocomplete só aceita interaction.respond().
+      if (interaction.isAutocomplete()) {
+        const command = client.commands.get(interaction.commandName);
+        if (!command?.autocomplete) return;
+        await command.autocomplete(interaction);
+        return;
+      }
+
       // ---- Slash commands ----
       if (interaction.isChatInputCommand()) {
         const command = client.commands.get(interaction.commandName);
@@ -111,6 +120,8 @@ module.exports = {
       }
     } catch (err) {
       console.error('[interactionCreate] Erro:', err);
+      // Autocomplete não tem canal de resposta de erro — só o log acima.
+      if (interaction.isAutocomplete?.()) return;
       const payload = { embeds: [errorEmbed('Ocorreu um erro ao processar sua ação.')] };
       if (interaction.deferred) {
         await interaction.editReply(payload).catch(() => {});
