@@ -1,0 +1,100 @@
+const { MessageFlags } = require('discord.js');
+const { db } = require('../database/db');
+const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
+const { colors, giveaway: giveawaySettings } = require('../config/settings');
+
+const stmts = {
+  byId: db.prepare('SELECT * FROM giveaways WHERE id = ?'),
+  pending: db.prepare("SELECT * FROM giveaways WHERE ended = 0 AND ends_at <= datetime('now')"),
+  enter: db.prepare('INSERT OR IGNORE INTO giveaway_entries (giveaway_id, user_id) VALUES (?, ?)'),
+  entries: db.prepare('SELECT user_id FROM giveaway_entries WHERE giveaway_id = ?'),
+  entryCount: db.prepare('SELECT COUNT(*) AS n FROM giveaway_entries WHERE giveaway_id = ?'),
+  markEnded: db.prepare('UPDATE giveaways SET ended = 1 WHERE id = ?'),
+};
+
+/** Sorteia N vencedores únicos entre as entradas. */
+function pickWinners(giveawayId, count) {
+  const entries = stmts.entries.all(giveawayId).map((row) => row.user_id);
+  const shuffled = [...entries];
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled.slice(0, count);
+}
+
+/** Botão "🎉 Participar". */
+async function handleEntryButton(interaction, giveawayId) {
+  const giveaway = stmts.byId.get(Number(giveawayId));
+  if (!giveaway || giveaway.ended) {
+    return interaction.reply({ embeds: [errorEmbed('Este sorteio já foi encerrado.')], flags: MessageFlags.Ephemeral });
+  }
+
+  const result = stmts.enter.run(giveaway.id, interaction.user.id);
+  if (result.changes === 0) {
+    return interaction.reply({ embeds: [errorEmbed('Você já está participando deste sorteio!')], flags: MessageFlags.Ephemeral });
+  }
+
+  const total = stmts.entryCount.get(giveaway.id).n;
+  return interaction.reply({
+    embeds: [successEmbed(`Você entrou no sorteio de **${giveaway.prize}**! (${total} participantes)`, '🎉 Participação confirmada')],
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+/** Encerra um giveaway: sorteia, edita a mensagem e anuncia. */
+async function endGiveaway(client, giveaway) {
+  stmts.markEnded.run(giveaway.id);
+
+  const channel = await client.channels.fetch(giveaway.channel_id).catch(() => null);
+  if (!channel?.isTextBased()) return;
+
+  const winners = pickWinners(giveaway.id, giveaway.winners_count);
+  const winnersText = winners.length
+    ? winners.map((id) => `<@${id}>`).join(', ')
+    : 'Ninguém participou 😢';
+
+  if (giveaway.message_id) {
+    const message = await channel.messages.fetch(giveaway.message_id).catch(() => null);
+    if (message) {
+      await message
+        .edit({
+          embeds: [
+            baseEmbed({
+              title: `🎉 Sorteio encerrado: ${giveaway.prize}`,
+              description: `**Vencedor(es):** ${winnersText}`,
+              color: colors.warning,
+              footer: `ID: ${giveaway.id}`,
+            }),
+          ],
+          components: [],
+        })
+        .catch(() => {});
+    }
+  }
+
+  await channel
+    .send(
+      winners.length
+        ? `🎉 Parabéns ${winnersText}! Vocês ganharam **${giveaway.prize}**! (Sorteio #${giveaway.id})`
+        : `Sorteio de **${giveaway.prize}** encerrado sem participantes. (Sorteio #${giveaway.id})`
+    )
+    .catch(() => {});
+}
+
+/** Varredura periódica de giveaways vencidos — chamada no ready.js. */
+function startGiveawaySweeper(client) {
+  const sweep = async () => {
+    try {
+      for (const giveaway of stmts.pending.all()) {
+        await endGiveaway(client, giveaway);
+      }
+    } catch (err) {
+      console.error('[giveaways] Erro na varredura:', err);
+    }
+  };
+  sweep();
+  setInterval(sweep, giveawaySettings.sweepIntervalMs);
+}
+
+module.exports = { handleEntryButton, endGiveaway, pickWinners, startGiveawaySweeper };
