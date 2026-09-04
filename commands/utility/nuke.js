@@ -74,7 +74,7 @@ module.exports = {
       .send({
         embeds: [
           baseEmbed({
-            title: '💥 Canal recriado',
+            title: 'Canal recriado',
             description: `Todas as mensagens foram apagadas por ${interaction.user}.`,
             color: colors.warning,
           }),
@@ -84,7 +84,7 @@ module.exports = {
 
     await logEvent(
       interaction.guild,
-      '💥 Canal recriado (/nuke)',
+      'Canal recriado',
       `O canal **#${original.name}** foi recriado do zero.`,
       colors.warning,
       [
