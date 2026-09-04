@@ -1,7 +1,9 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { baseEmbed, successEmbed, errorEmbed } = require('../../utils/embeds');
 
 module.exports = {
+  ephemeral: true,
   data: new SlashCommandBuilder()
     .setName('embed')
     .setDescription('Envia um embed personalizado pelo bot')
@@ -24,16 +26,15 @@ module.exports = {
     if (colorRaw) {
       const match = /^#?([0-9a-fA-F]{6})$/.exec(colorRaw.trim());
       if (!match) {
-        return interaction.reply({ embeds: [errorEmbed('Cor inválida. Use o formato hex, ex: `#5865F2`.')], flags: MessageFlags.Ephemeral });
+        return respond(interaction, { embeds: [errorEmbed('Cor inválida. Use o formato hex, ex: `#5865F2`.')] });
       }
       color = parseInt(match[1], 16);
     }
 
     await channel.send({ embeds: [baseEmbed({ title, description, color })] });
 
-    return interaction.reply({
+    return respond(interaction, {
       embeds: [successEmbed(`Embed enviado em ${channel}.`)],
-      flags: MessageFlags.Ephemeral,
     });
   },
 };

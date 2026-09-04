@@ -1,6 +1,6 @@
 const {
-  SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, MessageFlags,
-} = require('discord.js');
+  SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { db } = require('../../database/db');
 const { baseEmbed, successEmbed, errorEmbed } = require('../../utils/embeds');
 
@@ -10,6 +10,7 @@ const insertRR = db.prepare(
 const setMessageId = db.prepare('UPDATE reaction_roles SET message_id = ? WHERE id = ?');
 
 module.exports = {
+  ephemeral: true,
   data: new SlashCommandBuilder()
     .setName('reactionrole-setup')
     .setDescription('Cria uma mensagem de auto-atribuição de cargo (botão toggle)')
@@ -29,15 +30,13 @@ module.exports = {
     const emoji = interaction.options.getString('emoji') ?? '🎭';
 
     if (role.position >= interaction.guild.members.me.roles.highest.position) {
-      return interaction.reply({
+      return respond(interaction, {
         embeds: [errorEmbed('Meu cargo precisa estar acima do cargo escolhido para eu poder atribuí-lo.')],
-        flags: MessageFlags.Ephemeral,
       });
     }
     if (role.managed || role.id === interaction.guild.roles.everyone.id) {
-      return interaction.reply({
+      return respond(interaction, {
         embeds: [errorEmbed('Este cargo não pode ser atribuído manualmente.')],
-        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -59,9 +58,8 @@ module.exports = {
     });
     setMessageId.run(message.id, entryId);
 
-    return interaction.reply({
+    return respond(interaction, {
       embeds: [successEmbed(`Self-role de ${role} publicado em ${channel}.`)],
-      flags: MessageFlags.Ephemeral,
     });
   },
 };

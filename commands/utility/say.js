@@ -1,7 +1,9 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { successEmbed } = require('../../utils/embeds');
 
 module.exports = {
+  ephemeral: true,
   data: new SlashCommandBuilder()
     .setName('say')
     .setDescription('Envia uma mensagem pelo bot')
@@ -19,9 +21,8 @@ module.exports = {
     // bloqueia menções em massa mesmo vindo da staff
     await channel.send({ content: text, allowedMentions: { parse: ['users'] } });
 
-    return interaction.reply({
+    return respond(interaction, {
       embeds: [successEmbed(`Mensagem enviada em ${channel}.`)],
-      flags: MessageFlags.Ephemeral,
     });
   },
 };

@@ -1,4 +1,5 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { db } = require('../../database/db');
 const { successEmbed, errorEmbed } = require('../../utils/embeds');
 
@@ -6,6 +7,7 @@ const listCategories = db.prepare('SELECT id, label FROM ticket_categories WHERE
 const deleteCategory = db.prepare('DELETE FROM ticket_categories WHERE id = ? AND guild_id = ?');
 
 module.exports = {
+  ephemeral: true,
   data: new SlashCommandBuilder()
     .setName('ticket-remove-category')
     .setDescription('Remove uma categoria de ticket')
@@ -24,15 +26,13 @@ module.exports = {
       const list = existing.length
         ? existing.map((c) => `\`${c.id}\` — ${c.label}`).join('\n')
         : 'Nenhuma categoria cadastrada.';
-      return interaction.reply({
+      return respond(interaction, {
         embeds: [errorEmbed(`Categoria \`${id}\` não encontrada. Categorias existentes:\n${list}`)],
-        flags: MessageFlags.Ephemeral,
       });
     }
 
-    return interaction.reply({
+    return respond(interaction, {
       embeds: [successEmbed(`Categoria \`${id}\` removida.`)],
-      flags: MessageFlags.Ephemeral,
     });
   },
 };

@@ -1,4 +1,5 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { db } = require('../../database/db');
 const { baseEmbed } = require('../../utils/embeds');
 const { colors } = require('../../config/settings');
@@ -8,6 +9,7 @@ const listWarns = db.prepare(
 );
 
 module.exports = {
+  ephemeral: true,
   data: new SlashCommandBuilder()
     .setName('warnings')
     .setDescription('Lista as advertências de um membro')
@@ -25,9 +27,8 @@ module.exports = {
           .join('\n\n')
       : 'Nenhuma advertência registrada. ✨';
 
-    return interaction.reply({
+    return respond(interaction, {
       embeds: [baseEmbed({ title: `⚠️ Advertências de ${user.tag}`, description, color: colors.warning })],
-      flags: MessageFlags.Ephemeral,
     });
   },
 };

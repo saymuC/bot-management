@@ -1,4 +1,5 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const ms = require('ms');
 const { successEmbed, errorEmbed } = require('../../utils/embeds');
 const { logEvent } = require('../../utils/logger');
@@ -7,6 +8,7 @@ const { colors } = require('../../config/settings');
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000; // limite do Discord: 28 dias
 
 module.exports = {
+  ephemeral: false,
   data: new SlashCommandBuilder()
     .setName('mute')
     .setDescription('Silencia um membro (timeout nativo do Discord)')
@@ -25,18 +27,17 @@ module.exports = {
 
     const duration = ms(durationRaw);
     if (!duration || duration < 5000 || duration > MAX_TIMEOUT_MS) {
-      return interaction.reply({
+      return respond(interaction, {
         embeds: [errorEmbed('Duração inválida. Use algo entre `5s` e `28d` (ex: `10m`, `1h`, `2d`).')],
-        flags: MessageFlags.Ephemeral,
       });
     }
 
     const member = await interaction.guild.members.fetch(user.id).catch(() => null);
     if (!member) {
-      return interaction.reply({ embeds: [errorEmbed('Este usuário não está no servidor.')], flags: MessageFlags.Ephemeral });
+      return respond(interaction, { embeds: [errorEmbed('Este usuário não está no servidor.')] });
     }
     if (!member.moderatable) {
-      return interaction.reply({ embeds: [errorEmbed('Não consigo silenciar este membro (hierarquia de cargos).')], flags: MessageFlags.Ephemeral });
+      return respond(interaction, { embeds: [errorEmbed('Não consigo silenciar este membro (hierarquia de cargos).')] });
     }
 
     await member.timeout(duration, `${reason} — por ${interaction.user.tag}`);
@@ -45,7 +46,7 @@ module.exports = {
       `**Usuário:** ${user.tag} (${user.id})\n**Moderador:** ${interaction.user.tag}\n**Duração:** ${durationRaw}\n**Motivo:** ${reason}`,
       colors.warning);
 
-    return interaction.reply({
+    return respond(interaction, {
       embeds: [successEmbed(`**${user.tag}** silenciado por **${durationRaw}**.\n**Motivo:** ${reason}`, '🔇 Silenciado')],
     });
   },

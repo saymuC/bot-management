@@ -1,4 +1,5 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { db } = require('../../database/db');
 const { successEmbed, errorEmbed } = require('../../utils/embeds');
 
@@ -8,6 +9,7 @@ const insertCategory = db.prepare(
 const countCategories = db.prepare('SELECT COUNT(*) AS n FROM ticket_categories WHERE guild_id = ?');
 
 module.exports = {
+  ephemeral: true,
   data: new SlashCommandBuilder()
     .setName('ticket-add-category')
     .setDescription('Adiciona uma categoria de ticket (ex: Suporte, Bug, Denúncia)')
@@ -22,9 +24,8 @@ module.exports = {
 
   async execute(interaction) {
     if (countCategories.get(interaction.guild.id).n >= 25) {
-      return interaction.reply({
+      return respond(interaction, {
         embeds: [errorEmbed('Limite de 25 categorias atingido (máximo do select menu do Discord).')],
-        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -35,7 +36,7 @@ module.exports = {
 
     insertCategory.run(interaction.guild.id, label, emoji, category?.id ?? null, role?.id ?? null);
 
-    return interaction.reply({
+    return respond(interaction, {
       embeds: [
         successEmbed(
           [
@@ -45,7 +46,6 @@ module.exports = {
           ].join('\n')
         ),
       ],
-      flags: MessageFlags.Ephemeral,
     });
   },
 };

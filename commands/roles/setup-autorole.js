@@ -1,8 +1,10 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { setGuildConfig } = require('../../database/db');
 const { successEmbed, errorEmbed } = require('../../utils/embeds');
 
 module.exports = {
+  ephemeral: true,
   data: new SlashCommandBuilder()
     .setName('setup-autorole')
     .setDescription('Define o cargo automático para novos membros')
@@ -15,20 +17,18 @@ module.exports = {
 
     if (!role) {
       setGuildConfig(interaction.guild.id, 'autorole_id', null);
-      return interaction.reply({ embeds: [successEmbed('Autorole desativado.')], flags: MessageFlags.Ephemeral });
+      return respond(interaction, { embeds: [successEmbed('Autorole desativado.')] });
     }
 
     if (role.position >= interaction.guild.members.me.roles.highest.position || role.managed) {
-      return interaction.reply({
+      return respond(interaction, {
         embeds: [errorEmbed('Não consigo atribuir este cargo (hierarquia ou cargo gerenciado).')],
-        flags: MessageFlags.Ephemeral,
       });
     }
 
     setGuildConfig(interaction.guild.id, 'autorole_id', role.id);
-    return interaction.reply({
+    return respond(interaction, {
       embeds: [successEmbed(`Novos membros receberão automaticamente o cargo ${role}.`)],
-      flags: MessageFlags.Ephemeral,
     });
   },
 };

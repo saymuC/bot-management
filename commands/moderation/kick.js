@@ -1,9 +1,11 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { successEmbed, errorEmbed } = require('../../utils/embeds');
 const { logEvent } = require('../../utils/logger');
 const { colors } = require('../../config/settings');
 
 module.exports = {
+  ephemeral: false,
   data: new SlashCommandBuilder()
     .setName('kick')
     .setDescription('Expulsa um membro do servidor')
@@ -18,10 +20,10 @@ module.exports = {
 
     const member = await interaction.guild.members.fetch(user.id).catch(() => null);
     if (!member) {
-      return interaction.reply({ embeds: [errorEmbed('Este usuário não está no servidor.')], flags: MessageFlags.Ephemeral });
+      return respond(interaction, { embeds: [errorEmbed('Este usuário não está no servidor.')] });
     }
     if (!member.kickable) {
-      return interaction.reply({ embeds: [errorEmbed('Não consigo expulsar este membro (hierarquia de cargos).')], flags: MessageFlags.Ephemeral });
+      return respond(interaction, { embeds: [errorEmbed('Não consigo expulsar este membro (hierarquia de cargos).')] });
     }
 
     await member.kick(`${reason} — por ${interaction.user.tag}`);
@@ -29,6 +31,6 @@ module.exports = {
     await logEvent(interaction.guild, '👢 Kick aplicado',
       `**Usuário:** ${user.tag} (${user.id})\n**Moderador:** ${interaction.user.tag}\n**Motivo:** ${reason}`, colors.warning);
 
-    return interaction.reply({ embeds: [successEmbed(`**${user.tag}** foi expulso.\n**Motivo:** ${reason}`, '👢 Expulso')] });
+    return respond(interaction, { embeds: [successEmbed(`**${user.tag}** foi expulso.\n**Motivo:** ${reason}`, '👢 Expulso')] });
   },
 };

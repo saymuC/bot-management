@@ -1,9 +1,11 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { successEmbed, errorEmbed } = require('../../utils/embeds');
 const { logEvent } = require('../../utils/logger');
 const { colors } = require('../../config/settings');
 
 module.exports = {
+  ephemeral: false,
   data: new SlashCommandBuilder()
     .setName('ban')
     .setDescription('Bane um membro do servidor')
@@ -23,11 +25,11 @@ module.exports = {
     const member = await interaction.guild.members.fetch(user.id).catch(() => null);
     if (member) {
       if (!member.bannable) {
-        return interaction.reply({ embeds: [errorEmbed('Não consigo banir este membro (hierarquia de cargos).')], flags: MessageFlags.Ephemeral });
+        return respond(interaction, { embeds: [errorEmbed('Não consigo banir este membro (hierarquia de cargos).')] });
       }
       if (member.roles.highest.position >= interaction.member.roles.highest.position &&
           interaction.guild.ownerId !== interaction.user.id) {
-        return interaction.reply({ embeds: [errorEmbed('Você não pode banir alguém com cargo igual ou superior ao seu.')], flags: MessageFlags.Ephemeral });
+        return respond(interaction, { embeds: [errorEmbed('Você não pode banir alguém com cargo igual ou superior ao seu.')] });
       }
     }
 
@@ -39,6 +41,6 @@ module.exports = {
     await logEvent(interaction.guild, '🔨 Ban aplicado',
       `**Usuário:** ${user.tag} (${user.id})\n**Moderador:** ${interaction.user.tag}\n**Motivo:** ${reason}`, colors.error);
 
-    return interaction.reply({ embeds: [successEmbed(`**${user.tag}** foi banido.\n**Motivo:** ${reason}`, '🔨 Banido')] });
+    return respond(interaction, { embeds: [successEmbed(`**${user.tag}** foi banido.\n**Motivo:** ${reason}`, '🔨 Banido')] });
   },
 };

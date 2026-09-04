@@ -1,8 +1,10 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { setGuildConfig } = require('../../database/db');
 const { successEmbed } = require('../../utils/embeds');
 
 module.exports = {
+  ephemeral: true,
   data: new SlashCommandBuilder()
     .setName('setup-welcome')
     .setDescription('Configura as mensagens de boas-vindas')
@@ -22,7 +24,7 @@ module.exports = {
     setGuildConfig(interaction.guild.id, 'welcome_channel_id', channel.id);
     if (message) setGuildConfig(interaction.guild.id, 'welcome_message', message);
 
-    return interaction.reply({
+    return respond(interaction, {
       embeds: [
         successEmbed(
           `Boas-vindas configuradas em ${channel}.\n` +
@@ -30,7 +32,6 @@ module.exports = {
             '\n\nPlaceholders: `{user}` `{username}` `{server}` `{membercount}`'
         ),
       ],
-      flags: MessageFlags.Ephemeral,
     });
   },
 };

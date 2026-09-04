@@ -1,4 +1,5 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { db } = require('../../database/db');
 const { errorEmbed } = require('../../utils/embeds');
 const { pickWinners } = require('../../handlers/giveawayHandler');
@@ -6,6 +7,7 @@ const { pickWinners } = require('../../handlers/giveawayHandler');
 const getGiveaway = db.prepare('SELECT * FROM giveaways WHERE id = ? AND guild_id = ?');
 
 module.exports = {
+  ephemeral: false,
   data: new SlashCommandBuilder()
     .setName('giveaway-reroll')
     .setDescription('Sorteia novo(s) vencedor(es) de um sorteio encerrado')
@@ -22,18 +24,18 @@ module.exports = {
 
     const giveaway = getGiveaway.get(id, interaction.guild.id);
     if (!giveaway) {
-      return interaction.reply({ embeds: [errorEmbed(`Sorteio \`${id}\` não encontrado neste servidor.`)], flags: MessageFlags.Ephemeral });
+      return respond(interaction, { embeds: [errorEmbed(`Sorteio \`${id}\` não encontrado neste servidor.`)] });
     }
     if (!giveaway.ended) {
-      return interaction.reply({ embeds: [errorEmbed('Este sorteio ainda está em andamento.')], flags: MessageFlags.Ephemeral });
+      return respond(interaction, { embeds: [errorEmbed('Este sorteio ainda está em andamento.')] });
     }
 
     const winners = pickWinners(giveaway.id, count);
     if (!winners.length) {
-      return interaction.reply({ embeds: [errorEmbed('Nenhum participante para sortear.')], flags: MessageFlags.Ephemeral });
+      return respond(interaction, { embeds: [errorEmbed('Nenhum participante para sortear.')] });
     }
 
-    return interaction.reply(
+    return respond(interaction, 
       `🎉 **Reroll do sorteio #${giveaway.id}** (${giveaway.prize}):\nNovo(s) vencedor(es): ${winners.map((w) => `<@${w}>`).join(', ')}`
     );
   },

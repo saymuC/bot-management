@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { db } = require('../../database/db');
 const { successEmbed } = require('../../utils/embeds');
 const { logEvent } = require('../../utils/logger');
@@ -10,6 +11,7 @@ const insertWarn = db.prepare(
 const countWarns = db.prepare('SELECT COUNT(*) AS n FROM warns WHERE guild_id = ? AND user_id = ?');
 
 module.exports = {
+  ephemeral: false,
   data: new SlashCommandBuilder()
     .setName('warn')
     .setDescription('Aplica uma advertência a um membro')
@@ -32,7 +34,7 @@ module.exports = {
     // tenta avisar por DM (falha silenciosa se fechada)
     await user.send(`⚠️ Você recebeu uma advertência em **${interaction.guild.name}**.\nMotivo: ${reason}`).catch(() => {});
 
-    return interaction.reply({
+    return respond(interaction, {
       embeds: [successEmbed(`**${user.tag}** advertido (total: **${total}**).\n**Motivo:** ${reason}`, '⚠️ Advertência aplicada')],
     });
   },

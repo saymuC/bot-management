@@ -1,9 +1,11 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { setGuildConfig } = require('../../database/db');
 const { baseEmbed, successEmbed } = require('../../utils/embeds');
 const { buildPanelComponents } = require('../../handlers/ticketHandler');
 
 module.exports = {
+  ephemeral: true,
   data: new SlashCommandBuilder()
     .setName('ticket-panel')
     .setDescription('Publica o painel de abertura de tickets')
@@ -29,9 +31,8 @@ module.exports = {
 
     setGuildConfig(interaction.guild.id, 'ticket_panel_channel_id', channel.id);
 
-    return interaction.reply({
+    return respond(interaction, {
       embeds: [successEmbed(`Painel de tickets publicado em ${channel}.`)],
-      flags: MessageFlags.Ephemeral,
     });
   },
 };

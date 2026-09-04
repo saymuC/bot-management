@@ -1,6 +1,6 @@
 const {
-  SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags,
-} = require('discord.js');
+  SlashCommandBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const ms = require('ms');
 const dayjs = require('dayjs');
 const { db } = require('../../database/db');
@@ -12,6 +12,7 @@ const insertGiveaway = db.prepare(
 const setMessageId = db.prepare('UPDATE giveaways SET message_id = ? WHERE id = ?');
 
 module.exports = {
+  ephemeral: true,
   data: new SlashCommandBuilder()
     .setName('giveaway-start')
     .setDescription('Inicia um sorteio')
@@ -30,9 +31,8 @@ module.exports = {
 
     const duration = ms(durationRaw);
     if (!duration || duration < 10_000 || duration > ms('30d')) {
-      return interaction.reply({
+      return respond(interaction, {
         embeds: [errorEmbed('Duração inválida. Use entre `10s` e `30d` (ex: `30m`, `1h`, `2d`).')],
-        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -73,9 +73,8 @@ module.exports = {
 
     setMessageId.run(message.id, giveawayId);
 
-    return interaction.reply({
+    return respond(interaction, {
       embeds: [successEmbed(`Sorteio **#${giveawayId}** de **${prize}** iniciado! Encerra <t:${endsAtUnix}:R>.`)],
-      flags: MessageFlags.Ephemeral,
     });
   },
 };

@@ -29,8 +29,10 @@ Convide o bot com o scope `bot applications.commands` e permissão de Administra
 | Tickets | `/ticket-panel` `/ticket-add-category` `/ticket-remove-category` |
 | Sorteios | `/giveaway-start` `/giveaway-reroll` |
 | Cargos | `/setup-autorole` `/reactionrole-setup` |
-| Utilidade | `/say` `/embed` |
+| Utilidade | `/say` `/embed` `/nuke` |
 | Configuração | `/setup-welcome` `/setup-logs` `/setup-verify` `/pull-user` |
+
+`/nuke confirmar:true` clona o canal atual (nome, tópico, NSFW, slowmode, categoria, posição e todas as permissões), apaga o original e registra a ação nos logs. É irreversível: as mensagens não são recuperáveis.
 
 ## Fluxo de tickets
 

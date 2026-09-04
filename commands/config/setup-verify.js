@@ -1,10 +1,11 @@
 const {
-  SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags,
-} = require('discord.js');
+  SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { setGuildConfig } = require('../../database/db');
 const { baseEmbed, successEmbed, errorEmbed } = require('../../utils/embeds');
 
 module.exports = {
+  ephemeral: true,
   data: new SlashCommandBuilder()
     .setName('setup-verify')
     .setDescription('Configura o sistema de verificação de entrada')
@@ -20,9 +21,8 @@ module.exports = {
     const role = interaction.options.getRole('cargo', true);
 
     if (role.position >= interaction.guild.members.me.roles.highest.position || role.managed) {
-      return interaction.reply({
+      return respond(interaction, {
         embeds: [errorEmbed('Não consigo atribuir este cargo. Coloque o cargo do bot acima do cargo de verificado.')],
-        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -43,14 +43,13 @@ module.exports = {
       ],
     });
 
-    return interaction.reply({
+    return respond(interaction, {
       embeds: [
         successEmbed(
           `Verificação configurada em ${channel} com o cargo ${role}.\n\n` +
             '💡 Dica: restrinja os canais do servidor para exigir esse cargo, deixando visível apenas o canal de verificação para quem entra.'
         ),
       ],
-      flags: MessageFlags.Ephemeral,
     });
   },
 };

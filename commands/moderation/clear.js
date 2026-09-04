@@ -1,9 +1,11 @@
-const { SlashCommandBuilder, PermissionFlagsBits, MessageFlags } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { respond } = require('../../utils/interactions');
 const { successEmbed, errorEmbed } = require('../../utils/embeds');
 const { logEvent } = require('../../utils/logger');
 const { colors } = require('../../config/settings');
 
 module.exports = {
+  ephemeral: true,
   data: new SlashCommandBuilder()
     .setName('clear')
     .setDescription('Apaga mensagens do canal atual')
@@ -18,9 +20,8 @@ module.exports = {
 
     const deleted = await interaction.channel.bulkDelete(amount, true).catch(() => null);
     if (!deleted) {
-      return interaction.reply({
+      return respond(interaction, {
         embeds: [errorEmbed('Falha ao apagar. Mensagens com mais de 14 dias não podem ser apagadas em massa.')],
-        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -28,9 +29,8 @@ module.exports = {
       `**Canal:** ${interaction.channel}\n**Quantidade:** ${deleted.size}\n**Moderador:** ${interaction.user.tag}`,
       colors.info);
 
-    return interaction.reply({
+    return respond(interaction, {
       embeds: [successEmbed(`${deleted.size} mensagens apagadas.`, '🧹 Limpeza concluída')],
-      flags: MessageFlags.Ephemeral,
     });
   },
 };
