@@ -1,3 +1,6 @@
+# bot-management
+Bot completo.
+
 # Bot Discord Multifuncional
 
 Bot de gerenciamento com tickets, moderação, sorteios, boas-vindas, logs, self-roles e verificação — Node.js + discord.js v14 + SQLite (better-sqlite3).
