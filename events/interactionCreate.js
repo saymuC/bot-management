@@ -1,6 +1,7 @@
 const { Events, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { routeTicketInteraction } = require('../handlers/ticketHandler');
 const { handleEntryButton } = require('../handlers/giveawayHandler');
+const { handleStatsPagination } = require('../handlers/ticketStatsHandler');
 const { isOAuthEnabled, createOAuthUrl } = require('../oauth/server');
 const { db, getGuildConfig } = require('../database/db');
 const { errorEmbed, successEmbed } = require('../utils/embeds');
@@ -83,9 +84,15 @@ module.exports = {
       // ---- Botões / selects / modals roteados por customId ----
       const customId = interaction.customId ?? '';
 
-      // O fluxo de tickets gerencia o próprio ack (deferUpdate no select menu).
+      // O fluxo de tickets gerencia o próprio ack (deferUpdate no select,
+      // showModal na avaliação — nenhum dos dois admite deferReply antes).
       if (customId.startsWith('ticket_')) {
         await routeTicketInteraction(interaction);
+        return;
+      }
+      // Paginação do /ticket-stats: edita a própria mensagem, sem defer.
+      if (customId.startsWith('tstats_')) {
+        await handleStatsPagination(interaction, customId.slice('tstats_'.length));
         return;
       }
       if (customId.startsWith('giveaway_enter_')) {

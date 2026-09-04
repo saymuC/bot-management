@@ -26,20 +26,30 @@ Convide o bot com o scope `bot applications.commands` e permissão de Administra
 | Módulo | Comandos |
 |---|---|
 | Moderação | `/ban` `/kick` `/mute` `/warn` `/warnings` `/clear` |
-| Tickets | `/ticket-panel` `/ticket-add-category` `/ticket-remove-category` |
+| Tickets | `/ticket-panel` `/ticket-add-category` `/ticket-remove-category` `/ticket-stats` |
 | Sorteios | `/giveaway-start` `/giveaway-reroll` |
 | Cargos | `/setup-autorole` `/reactionrole-setup` |
 | Utilidade | `/say` `/embed` `/nuke` |
-| Configuração | `/setup-welcome` `/setup-logs` `/setup-verify` `/pull-user` |
+| Configuração | `/setup-welcome` `/setup-logs` `/setup-ticket-logs` `/setup-verify` `/pull-user` |
 
 `/nuke confirmar:true` clona o canal atual (nome, tópico, NSFW, slowmode, categoria, posição e todas as permissões), apaga o original e registra a ação nos logs. É irreversível: as mensagens não são recuperáveis.
 
 ## Fluxo de tickets
 
 1. `/ticket-add-category label:"Bug" emoji:🐛 categoria:#Tickets cargo:@Suporte` (repita para cada tipo).
-2. `/ticket-panel canal:#suporte` publica o painel com o botão **Abrir Ticket**.
-3. O usuário escolhe a categoria no dropdown → o bot cria o canal privado com botões **Reivindicar** e **Fechar**.
-4. Ao fechar, o bot gera um transcript `.txt` e envia ao canal de logs antes de deletar o canal.
+2. `/setup-ticket-logs canal:#logs-tickets` define onde ficam os registros e transcripts. Sem isso, tudo cai no canal de `/setup-logs`.
+3. `/ticket-panel canal:#suporte` publica o painel com o botão **Abrir Ticket**.
+4. No clique em **Abrir Ticket** o bot já valida o limite de tickets abertos por usuário (`config/settings.js` → `ticket.maxOpenPerUser`), antes de mostrar as categorias.
+5. O usuário escolhe a categoria no dropdown → o bot cria o canal privado com botões **Reivindicar** e **Fechar**.
+6. **Reivindicar** é só para a equipe: quem abriu o ticket não pode assumir o próprio atendimento.
+7. Ao fechar, o bot registra no canal de logs quem reivindicou, quem fechou, a espera até o primeiro atendimento, o tempo de atendimento e a duração total, junto do **transcript em HTML** (tema escuro, com avatares, embeds e anexos).
+8. Em seguida o autor recebe uma DM pedindo a avaliação: 5 botões de ⭐. Ao clicar, abre um formulário com um comentário opcional. A nota fica creditada ao atendente que reivindicou o ticket.
+
+### KPIs de atendimento
+
+`/ticket-stats` lista os atendentes ordenados por nota média, 10 por página, com botões de navegação. Para cada um: nota média e quantidade de avaliações, tickets reivindicados, tickets fechados e **TMA** (tempo médio de atendimento, do momento da reivindicação até o fechamento). O rodapé traz os números do servidor inteiro.
+
+Só existe pedido de avaliação quando o ticket foi reivindicado — sem atendente responsável não há a quem creditar a nota. Cada ticket aceita uma única avaliação.
 
 ## Verificação com OAuth (opcional)
 

@@ -3,14 +3,17 @@ const {
   ButtonBuilder,
   ButtonStyle,
   StringSelectMenuBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   ChannelType,
   PermissionFlagsBits,
   MessageFlags,
-  AttachmentBuilder,
 } = require('discord.js');
 const { db, getGuildConfig } = require('../database/db');
 const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
-const { logEvent } = require('../utils/logger');
+const { fetchChannelHistory, buildHtmlTranscript } = require('../utils/transcript');
+const { durationBetween, formatDuration, parseSqlDate } = require('../utils/time');
 const { colors, ticket: ticketSettings } = require('../config/settings');
 
 const stmts = {
@@ -23,10 +26,23 @@ const stmts = {
     'INSERT INTO tickets (guild_id, channel_id, user_id, category_label) VALUES (?, ?, ?, ?)'
   ),
   ticketByChannel: db.prepare("SELECT * FROM tickets WHERE channel_id = ? AND status = 'open'"),
-  claim: db.prepare('UPDATE tickets SET claimed_by = ? WHERE id = ?'),
+  ticketById: db.prepare('SELECT * FROM tickets WHERE id = ?'),
+  claim: db.prepare('UPDATE tickets SET claimed_by = ?, claimed_at = CURRENT_TIMESTAMP WHERE id = ?'),
   close: db.prepare(
-    "UPDATE tickets SET status = 'closed', closed_at = CURRENT_TIMESTAMP WHERE id = ?"
+    "UPDATE tickets SET status = 'closed', closed_by = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?"
   ),
+  ratingByTicket: db.prepare('SELECT * FROM ticket_ratings WHERE ticket_id = ?'),
+  insertRating: db.prepare(
+    'INSERT INTO ticket_ratings (guild_id, ticket_id, agent_id, user_id, stars, comment) VALUES (?, ?, ?, ?, ?, ?)'
+  ),
+};
+
+const STAR_LABELS = {
+  1: 'Muito ruim',
+  2: 'Ruim',
+  3: 'Regular',
+  4: 'Bom',
+  5: 'Excelente',
 };
 
 /** Botão inicial do painel de tickets. */
@@ -42,8 +58,36 @@ function buildPanelComponents() {
   ];
 }
 
-/** Clique em "Abrir Ticket" → mostra select de categorias. */
+/**
+ * Canal de logs de tickets. Cai no canal de logs geral quando o específico
+ * não está configurado, para não perder transcripts em servidores antigos.
+ */
+async function resolveTicketLogChannel(guild) {
+  const config = getGuildConfig(guild.id);
+  const channelId = config?.ticket_log_channel_id || config?.log_channel_id;
+  if (!channelId) return null;
+
+  const channel = await guild.channels.fetch(channelId).catch(() => null);
+  return channel?.isTextBased() ? channel : null;
+}
+
+/** Clique em "Abrir Ticket" → valida o limite de tickets abertos e mostra o select. */
 async function handleOpenButton(interaction) {
+  // O limite é checado aqui, antes de escolher categoria: evita o usuário
+  // percorrer o fluxo inteiro para só então descobrir que está no limite.
+  const openCount = stmts.openCount.get(interaction.guild.id, interaction.user.id).n;
+  if (openCount >= ticketSettings.maxOpenPerUser) {
+    return interaction.reply({
+      embeds: [
+        errorEmbed(
+          `Você já tem **${openCount}** ticket(s) aberto(s), o máximo permitido é **${ticketSettings.maxOpenPerUser}**.\n` +
+            'Feche um dos tickets em andamento antes de abrir outro.'
+        ),
+      ],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
   const categories = stmts.categories.all(interaction.guild.id);
   if (!categories.length) {
     return interaction.reply({
@@ -76,14 +120,6 @@ async function handleCategorySelect(interaction) {
   if (!category) {
     return interaction.update({
       embeds: [errorEmbed('Categoria não encontrada. Ela pode ter sido removida.')],
-      components: [],
-    });
-  }
-
-  const openCount = stmts.openCount.get(interaction.guild.id, interaction.user.id).n;
-  if (openCount >= ticketSettings.maxOpenPerUser) {
-    return interaction.update({
-      embeds: [errorEmbed(`Você já tem ${openCount} tickets abertos. Feche um antes de abrir outro.`)],
       components: [],
     });
   }
@@ -166,12 +202,19 @@ async function handleCategorySelect(interaction) {
     components: [buttons],
   });
 
-  await logEvent(
-    interaction.guild,
-    '🎫 Ticket aberto',
-    `Ticket #${ticketId} (**${category.label}**) aberto por ${interaction.user} em ${channel}.`,
-    colors.info
-  );
+  const logChannel = await resolveTicketLogChannel(interaction.guild);
+  await logChannel
+    ?.send({
+      embeds: [
+        baseEmbed({
+          title: '🎫 Ticket aberto',
+          description: `Ticket **#${ticketId}** (**${category.label}**) aberto por ${interaction.user} em ${channel}.`,
+          color: colors.info,
+          fields: [{ name: 'Autor', value: `${interaction.user} (\`${interaction.user.id}\`)`, inline: true }],
+        }),
+      ],
+    })
+    .catch((err) => console.error('[tickets] Falha ao logar abertura:', err.message));
 
   return interaction.editReply({
     embeds: [successEmbed(`Seu ticket foi criado: ${channel}`)],
@@ -179,11 +222,17 @@ async function handleCategorySelect(interaction) {
   });
 }
 
-/** Botão "Reivindicar". */
+/** Botão "Reivindicar" — exclusivo da equipe, o autor do ticket não pode assumir. */
 async function handleClaim(interaction, ticketId) {
   const ticket = stmts.ticketByChannel.get(interaction.channel.id);
   if (!ticket || ticket.id !== Number(ticketId)) {
     return interaction.reply({ embeds: [errorEmbed('Ticket não encontrado ou já fechado.')], flags: MessageFlags.Ephemeral });
+  }
+  if (ticket.user_id === interaction.user.id) {
+    return interaction.reply({
+      embeds: [errorEmbed('Você abriu este ticket, então não pode reivindicá-lo. Aguarde um atendente da equipe.')],
+      flags: MessageFlags.Ephemeral,
+    });
   }
   if (ticket.claimed_by) {
     return interaction.reply({
@@ -193,12 +242,61 @@ async function handleClaim(interaction, ticketId) {
   }
 
   stmts.claim.run(interaction.user.id, ticket.id);
-  return interaction.reply({
+
+  await interaction.reply({
     embeds: [successEmbed(`${interaction.user} reivindicou este ticket e será o responsável pelo atendimento.`, '🙋 Ticket reivindicado')],
   });
+
+  const logChannel = await resolveTicketLogChannel(interaction.guild);
+  await logChannel
+    ?.send({
+      embeds: [
+        baseEmbed({
+          title: '🙋 Ticket reivindicado',
+          description: `Ticket #${ticket.id} (**${ticket.category_label}**) de <@${ticket.user_id}>.`,
+          color: colors.info,
+          fields: [
+            { name: 'Atendente', value: `${interaction.user} (\`${interaction.user.id}\`)`, inline: true },
+            {
+              name: 'Espera até o atendimento',
+              value: formatDuration(Date.now() - (parseSqlDate(ticket.created_at)?.getTime() ?? Date.now())),
+              inline: true,
+            },
+          ],
+        }),
+      ],
+    })
+    .catch((err) => console.error('[tickets] Falha ao logar claim:', err.message));
 }
 
-/** Botão "Fechar": gera transcript, envia pro log e deleta o canal. */
+/** Monta o pedido de avaliação enviado na DM do autor do ticket. */
+function buildRatingRequest(ticket, guildName) {
+  const buttons = new ActionRowBuilder().addComponents(
+    [1, 2, 3, 4, 5].map((stars) =>
+      new ButtonBuilder()
+        .setCustomId(`ticket_rate_${ticket.id}_${stars}`)
+        .setEmoji('⭐')
+        .setLabel(String(stars))
+        .setStyle(ButtonStyle.Secondary)
+    )
+  );
+
+  return {
+    embeds: [
+      baseEmbed({
+        title: '⭐ Avalie seu atendimento',
+        description:
+          `Seu ticket **#${ticket.id}** (${ticket.category_label ?? 'sem categoria'}) em **${guildName}** foi encerrado.\n\n` +
+          `Como você avalia o atendimento de <@${ticket.claimed_by}>?\n` +
+          'Escolha de 1 a 5 estrelas abaixo — em seguida você poderá deixar um comentário opcional.',
+        color: colors.primary,
+      }),
+    ],
+    components: [buttons],
+  };
+}
+
+/** Botão "Fechar": registra o fechamento, gera transcript HTML, loga e pede avaliação. */
 async function handleClose(interaction, ticketId) {
   const ticket = stmts.ticketByChannel.get(interaction.channel.id);
   if (!ticket || ticket.id !== Number(ticketId)) {
@@ -209,45 +307,164 @@ async function handleClose(interaction, ticketId) {
     embeds: [baseEmbed({ title: '🔒 Fechando ticket', description: 'Gerando transcript e arquivando em 5 segundos...', color: colors.warning })],
   });
 
-  stmts.close.run(ticket.id);
+  stmts.close.run(interaction.user.id, ticket.id);
+  const closed = stmts.ticketById.get(ticket.id);
 
-  // transcript simples em .txt (últimas 100 mensagens)
-  let transcriptFile = null;
+  // KPIs: espera até o primeiro atendimento e duração efetiva do atendimento.
+  const waitMs = durationBetween(closed.created_at, closed.claimed_at);
+  const handlingMs = durationBetween(closed.claimed_at ?? closed.created_at, closed.closed_at);
+  const totalMs = durationBetween(closed.created_at, closed.closed_at);
+
+  let transcript = null;
   try {
-    const messages = await interaction.channel.messages.fetch({ limit: 100 });
-    const lines = [...messages.values()]
-      .reverse()
-      .map((m) => `[${m.createdAt.toISOString()}] ${m.author.tag}: ${m.content || '[embed/anexo]'}`);
-    transcriptFile = new AttachmentBuilder(
-      Buffer.from(lines.join('\n'), 'utf-8'),
-      { name: `ticket-${ticket.id}-transcript.txt` }
-    );
+    const messages = await fetchChannelHistory(interaction.channel);
+    transcript = buildHtmlTranscript({
+      ticket: closed,
+      messages,
+      details: {
+        Servidor: interaction.guild.name,
+        Canal: `#${interaction.channel.name}`,
+        Autor: `${(await interaction.client.users.fetch(closed.user_id).catch(() => null))?.tag ?? closed.user_id} (${closed.user_id})`,
+        Atendente: closed.claimed_by
+          ? `${(await interaction.client.users.fetch(closed.claimed_by).catch(() => null))?.tag ?? closed.claimed_by} (${closed.claimed_by})`
+          : 'Não reivindicado',
+        'Fechado por': `${interaction.user.tag} (${interaction.user.id})`,
+        Aberto: `${closed.created_at} UTC`,
+        Fechado: `${closed.closed_at} UTC`,
+        'Tempo de atendimento': formatDuration(handlingMs),
+      },
+    });
   } catch (err) {
     console.error('[tickets] Falha ao gerar transcript:', err.message);
   }
 
-  const config = getGuildConfig(interaction.guild.id);
-  if (config?.log_channel_id) {
-    const logChannel = await interaction.guild.channels.fetch(config.log_channel_id).catch(() => null);
-    if (logChannel?.isTextBased()) {
-      await logChannel
-        .send({
-          embeds: [
-            baseEmbed({
-              title: '🔒 Ticket fechado',
-              description: `Ticket #${ticket.id} (**${ticket.category_label}**) de <@${ticket.user_id}> fechado por ${interaction.user}.`,
-              color: colors.warning,
-            }),
-          ],
-          files: transcriptFile ? [transcriptFile] : [],
-        })
-        .catch((err) => console.error('[tickets] Falha ao enviar transcript:', err.message));
-    }
+  const logChannel = await resolveTicketLogChannel(interaction.guild);
+  if (logChannel) {
+    await logChannel
+      .send({
+        embeds: [
+          baseEmbed({
+            title: '🔒 Ticket fechado',
+            description: `Ticket **#${closed.id}** (**${closed.category_label}**) de <@${closed.user_id}>.`,
+            color: colors.warning,
+            fields: [
+              { name: 'Fechado por', value: `${interaction.user}`, inline: true },
+              { name: 'Atendente', value: closed.claimed_by ? `<@${closed.claimed_by}>` : 'Não reivindicado', inline: true },
+              { name: 'Espera até atender', value: formatDuration(waitMs), inline: true },
+              { name: 'Tempo de atendimento', value: formatDuration(handlingMs), inline: true },
+              { name: 'Duração total', value: formatDuration(totalMs), inline: true },
+              { name: 'Canal', value: `#${interaction.channel.name}`, inline: true },
+            ],
+          }),
+        ],
+        files: transcript ? [transcript] : [],
+      })
+      .catch((err) => console.error('[tickets] Falha ao enviar transcript:', err.message));
+  }
+
+  // Avaliação só faz sentido quando há um atendente responsável.
+  if (closed.claimed_by) {
+    const author = await interaction.client.users.fetch(closed.user_id).catch(() => null);
+    await author
+      ?.send(buildRatingRequest(closed, interaction.guild.name))
+      .catch(() => console.log(`[tickets] DM de avaliação bloqueada pelo usuário ${closed.user_id}.`));
   }
 
   setTimeout(() => {
-    interaction.channel.delete(`Ticket #${ticket.id} fechado por ${interaction.user.tag}`).catch(() => {});
+    interaction.channel.delete(`Ticket #${closed.id} fechado por ${interaction.user.tag}`).catch(() => {});
   }, 5000);
+}
+
+/** Clique numa estrela na DM → abre o modal de comentário opcional. */
+async function handleRatingButton(interaction, payload) {
+  const [rawTicketId, rawStars] = payload.split('_');
+  const ticket = stmts.ticketById.get(Number(rawTicketId));
+  const stars = Number(rawStars);
+
+  if (!ticket || ticket.user_id !== interaction.user.id) {
+    return interaction.reply({ embeds: [errorEmbed('Não encontrei este atendimento.')], flags: MessageFlags.Ephemeral });
+  }
+  if (stmts.ratingByTicket.get(ticket.id)) {
+    return interaction.reply({
+      embeds: [errorEmbed('Você já avaliou este atendimento. Obrigado!')],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  const modal = new ModalBuilder()
+    .setCustomId(`ticket_ratemodal_${ticket.id}_${stars}`)
+    .setTitle(`Avaliação: ${stars} estrela${stars > 1 ? 's' : ''}`)
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('comment')
+          .setLabel('Quer comentar algo sobre o atendimento?')
+          .setPlaceholder('Opcional — conte o que foi bom ou o que podemos melhorar.')
+          .setStyle(TextInputStyle.Paragraph)
+          .setMaxLength(1000)
+          .setRequired(false)
+      )
+    );
+
+  return interaction.showModal(modal);
+}
+
+/** Envio do modal → grava a avaliação e credita o atendente. */
+async function handleRatingModal(interaction, payload) {
+  const [rawTicketId, rawStars] = payload.split('_');
+  const ticket = stmts.ticketById.get(Number(rawTicketId));
+  const stars = Number(rawStars);
+
+  if (!ticket || ticket.user_id !== interaction.user.id || !ticket.claimed_by) {
+    return interaction.reply({ embeds: [errorEmbed('Não encontrei este atendimento.')], flags: MessageFlags.Ephemeral });
+  }
+
+  const comment = interaction.fields.getTextInputValue('comment').trim() || null;
+
+  try {
+    stmts.insertRating.run(ticket.guild_id, ticket.id, ticket.claimed_by, interaction.user.id, stars, comment);
+  } catch (err) {
+    // UNIQUE(ticket_id): corrida entre dois cliques na mesma DM.
+    console.error('[tickets] Falha ao registrar avaliação:', err.message);
+    return interaction.reply({
+      embeds: [errorEmbed('Este atendimento já possui uma avaliação registrada.')],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  await interaction.reply({
+    embeds: [
+      successEmbed(
+        `Avaliação registrada: ${'⭐'.repeat(stars)} (${STAR_LABELS[stars]}).\n` +
+          (comment ? 'Seu comentário foi enviado à equipe.' : 'Obrigado pelo retorno!'),
+        '⭐ Obrigado pela avaliação'
+      ),
+    ],
+  });
+
+  // Remove os botões da DM para não permitir novo clique.
+  await interaction.message?.edit({ components: [] }).catch(() => {});
+
+  const guild = await interaction.client.guilds.fetch(ticket.guild_id).catch(() => null);
+  if (!guild) return;
+
+  const logChannel = await resolveTicketLogChannel(guild);
+  await logChannel
+    ?.send({
+      embeds: [
+        baseEmbed({
+          title: '⭐ Atendimento avaliado',
+          description: `Ticket **#${ticket.id}** (**${ticket.category_label}**) avaliado por <@${ticket.user_id}>.`,
+          color: stars >= 4 ? colors.success : stars <= 2 ? colors.error : colors.warning,
+          fields: [
+            { name: 'Atendente', value: `<@${ticket.claimed_by}>`, inline: true },
+            { name: 'Nota', value: `${'⭐'.repeat(stars)} ${stars}/5 — ${STAR_LABELS[stars]}`, inline: true },
+            { name: 'Comentário', value: comment ?? '*sem comentário*', inline: false },
+          ],
+        }),
+      ],
+    })
+    .catch((err) => console.error('[tickets] Falha ao logar avaliação:', err.message));
 }
 
 /** Roteia interações de ticket pelo prefixo do customId. */
@@ -257,7 +474,9 @@ async function routeTicketInteraction(interaction) {
   if (customId === 'ticket_select_category') return handleCategorySelect(interaction);
   if (customId.startsWith('ticket_claim_')) return handleClaim(interaction, customId.slice('ticket_claim_'.length));
   if (customId.startsWith('ticket_close_')) return handleClose(interaction, customId.slice('ticket_close_'.length));
+  if (customId.startsWith('ticket_ratemodal_')) return handleRatingModal(interaction, customId.slice('ticket_ratemodal_'.length));
+  if (customId.startsWith('ticket_rate_')) return handleRatingButton(interaction, customId.slice('ticket_rate_'.length));
   return null;
 }
 
-module.exports = { buildPanelComponents, routeTicketInteraction };
+module.exports = { buildPanelComponents, routeTicketInteraction, STAR_LABELS };

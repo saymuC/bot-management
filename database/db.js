@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS guild_config (
   log_channel_id TEXT,
   ticket_category_id TEXT,
   ticket_panel_channel_id TEXT,
+  ticket_log_channel_id TEXT,
   verify_channel_id TEXT,
   verify_role_id TEXT,
   autorole_id TEXT,
@@ -36,8 +37,21 @@ CREATE TABLE IF NOT EXISTS tickets (
   category_label TEXT,
   status TEXT DEFAULT 'open',
   claimed_by TEXT,
+  claimed_at TEXT,
+  closed_by TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   closed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS ticket_ratings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  guild_id TEXT NOT NULL,
+  ticket_id INTEGER NOT NULL UNIQUE,
+  agent_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  stars INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 5),
+  comment TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS warns (
@@ -76,10 +90,28 @@ CREATE TABLE IF NOT EXISTS reaction_roles (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tickets_guild_user ON tickets (guild_id, user_id, status);
+CREATE INDEX IF NOT EXISTS idx_tickets_claimed ON tickets (guild_id, claimed_by);
+CREATE INDEX IF NOT EXISTS idx_ticket_ratings_agent ON ticket_ratings (guild_id, agent_id);
 CREATE INDEX IF NOT EXISTS idx_warns_guild_user ON warns (guild_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_reaction_roles_message ON reaction_roles (message_id);
 CREATE INDEX IF NOT EXISTS idx_giveaways_pending ON giveaways (ended, ends_at);
 `);
+
+/**
+ * Migrações de coluna: o CREATE TABLE IF NOT EXISTS acima não altera tabelas
+ * que já existem, então bancos criados antes destas features precisam do ALTER.
+ * Idempotente — consulta o schema atual antes de mexer.
+ */
+function ensureColumn(table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (columns.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  console.log(`[db] Migração: ${table}.${column} adicionada.`);
+}
+
+ensureColumn('guild_config', 'ticket_log_channel_id', 'TEXT');
+ensureColumn('tickets', 'claimed_at', 'TEXT');
+ensureColumn('tickets', 'closed_by', 'TEXT');
 
 // ---- guild_config ----
 const upsertConfigField = (field) =>
@@ -91,7 +123,7 @@ const upsertConfigField = (field) =>
 // campos permitidos — nunca interpolar entrada do usuário aqui
 const CONFIG_FIELDS = [
   'welcome_channel_id', 'welcome_message', 'log_channel_id',
-  'ticket_category_id', 'ticket_panel_channel_id',
+  'ticket_category_id', 'ticket_panel_channel_id', 'ticket_log_channel_id',
   'verify_channel_id', 'verify_role_id', 'autorole_id', 'mute_role_id',
 ];
 const configSetters = Object.fromEntries(CONFIG_FIELDS.map((f) => [f, upsertConfigField(f)]));

@@ -96,7 +96,7 @@ module.exports = {
 
     // O canal da interação deixou de existir, então a resposta original é inalcançável.
     return respond(interaction, {
-      embeds: [baseEmbed({ title: '💥 Canal recriado', description: `Novo canal: ${clone}` })],
+      embeds: [baseEmbed({ title: 'Canal recriado', description: `Novo canal: ${clone}` })],
     }).catch(() => {});
   },
 };
