@@ -9,6 +9,7 @@ const {
   findGuildGiveaway,
   listOpenGiveaways,
 } = require('../../handlers/giveawayHandler');
+const { emoji } = require('../../utils/emojis');
 
 module.exports = {
   ephemeral: true,
@@ -37,7 +38,10 @@ module.exports = {
         embeds: [
           open.length
             ? errorEmbed('Sorteio não encontrado. Escolha uma das opções sugeridas pelo autocomplete.')
-            : infoEmbed('Não há nenhum sorteio em andamento neste servidor.', '🎉 Sorteios'),
+            : infoEmbed(
+              'Não há nenhum sorteio em andamento neste servidor.',
+              `${emoji(interaction.guild, 'giveaway')} Sorteios`
+            ),
         ],
       });
     }
@@ -55,9 +59,10 @@ module.exports = {
 
     await cancelGiveaway(interaction.client, giveaway, interaction.user);
 
+    const cancelIcon = emoji(interaction.guild, 'giveaway_cancel');
     await logEvent(
       interaction.guild,
-      '🚫 Sorteio cancelado',
+      `${cancelIcon} Sorteio cancelado`,
       `O sorteio **#${giveaway.id}** (${giveaway.prize}) foi cancelado sem sorteio de vencedores.`,
       colors.error,
       [
@@ -71,7 +76,7 @@ module.exports = {
         successEmbed(
           `Sorteio **#${giveaway.id}** (${giveaway.prize}) cancelado.\n` +
             'Nenhum vencedor foi sorteado nem revelado, e o botão de participação foi removido.',
-          '🚫 Sorteio cancelado'
+          `${cancelIcon} Sorteio cancelado`
         ),
       ],
     });

@@ -3,6 +3,7 @@ const { respond } = require('../../utils/interactions');
 const { setGuildConfig } = require('../../database/db');
 const { baseEmbed, successEmbed } = require('../../utils/embeds');
 const { buildPanelComponents } = require('../../handlers/ticketHandler');
+const { emoji } = require('../../utils/emojis');
 
 module.exports = {
   ephemeral: true,
@@ -19,14 +20,15 @@ module.exports = {
 
   async execute(interaction) {
     const channel = interaction.options.getChannel('canal') ?? interaction.channel;
-    const title = interaction.options.getString('titulo') ?? '🎫 Central de Atendimento';
+    const title =
+      interaction.options.getString('titulo') ?? `${emoji(interaction.guild, 'ticket')} Central de Atendimento`;
     const description =
       interaction.options.getString('descricao') ??
       'Precisa de ajuda? Clique no botão abaixo para abrir um ticket e falar com a nossa equipe.';
 
     await channel.send({
       embeds: [baseEmbed({ title, description })],
-      components: buildPanelComponents(),
+      components: buildPanelComponents(interaction.guild),
     });
 
     setGuildConfig(interaction.guild.id, 'ticket_panel_channel_id', channel.id);

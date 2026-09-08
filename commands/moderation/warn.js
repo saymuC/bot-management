@@ -4,6 +4,7 @@ const { db } = require('../../database/db');
 const { successEmbed } = require('../../utils/embeds');
 const { logEvent } = require('../../utils/logger');
 const { colors } = require('../../config/settings');
+const { emoji } = require('../../utils/emojis');
 
 const insertWarn = db.prepare(
   'INSERT INTO warns (guild_id, user_id, moderator_id, reason) VALUES (?, ?, ?, ?)'
@@ -27,15 +28,18 @@ module.exports = {
     insertWarn.run(interaction.guild.id, user.id, interaction.user.id, reason);
     const total = countWarns.get(interaction.guild.id, user.id).n;
 
-    await logEvent(interaction.guild, '⚠️ Warn aplicado',
+    const icon = emoji(interaction.guild, 'warn');
+    await logEvent(interaction.guild, `${icon} Warn aplicado`,
       `**Usuário:** ${user.tag} (${user.id})\n**Moderador:** ${interaction.user.tag}\n**Motivo:** ${reason}\n**Total de warns:** ${total}`,
       colors.warning);
 
     // tenta avisar por DM (falha silenciosa se fechada)
-    await user.send(`⚠️ Você recebeu uma advertência em **${interaction.guild.name}**.\nMotivo: ${reason}`).catch(() => {});
+    await user.send(`${icon} Você recebeu uma advertência em **${interaction.guild.name}**.\nMotivo: ${reason}`).catch(() => {});
 
     return respond(interaction, {
-      embeds: [successEmbed(`**${user.tag}** advertido (total: **${total}**).\n**Motivo:** ${reason}`, '⚠️ Advertência aplicada')],
+      embeds: [
+        successEmbed(`**${user.tag}** advertido (total: **${total}**).\n**Motivo:** ${reason}`, `${icon} Advertência aplicada`),
+      ],
     });
   },
 };

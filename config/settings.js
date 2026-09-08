@@ -6,12 +6,8 @@ module.exports = {
     warning: 0xfee75c,
     info: 0x5865f2,
   },
-  emojis: {
-    ticket: '🎫',
-    giveaway: '🎉',
-    verify: '✅',
-    warn: '⚠️',
-  },
+  // Os emojis do bot ficam em utils/emojis.js: são configuráveis por servidor
+  // pelo /config-emojis, então não podem ser constantes fixas aqui.
   giveaway: {
     // intervalo (ms) da varredura de giveaways vencidos
     sweepIntervalMs: 30 * 1000,

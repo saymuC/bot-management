@@ -3,6 +3,7 @@ const { respond } = require('../../utils/interactions');
 const { successEmbed, errorEmbed } = require('../../utils/embeds');
 const { logEvent } = require('../../utils/logger');
 const { colors } = require('../../config/settings');
+const { emoji } = require('../../utils/emojis');
 
 module.exports = {
   ephemeral: false,
@@ -38,9 +39,12 @@ module.exports = {
       deleteMessageSeconds: deleteDays * 86400,
     });
 
-    await logEvent(interaction.guild, '🔨 Ban aplicado',
+    const icon = emoji(interaction.guild, 'ban');
+    await logEvent(interaction.guild, `${icon} Ban aplicado`,
       `**Usuário:** ${user.tag} (${user.id})\n**Moderador:** ${interaction.user.tag}\n**Motivo:** ${reason}`, colors.error);
 
-    return respond(interaction, { embeds: [successEmbed(`**${user.tag}** foi banido.\n**Motivo:** ${reason}`, '🔨 Banido')] });
+    return respond(interaction, {
+      embeds: [successEmbed(`**${user.tag}** foi banido.\n**Motivo:** ${reason}`, `${icon} Banido`)],
+    });
   },
 };

@@ -2,6 +2,7 @@ const { MessageFlags } = require('discord.js');
 const { db } = require('../database/db');
 const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
 const { colors, giveaway: giveawaySettings } = require('../config/settings');
+const { emoji } = require('../utils/emojis');
 
 const stmts = {
   byId: db.prepare('SELECT * FROM giveaways WHERE id = ?'),
@@ -62,7 +63,7 @@ function pickWinners(giveawayId, count) {
   return shuffled.slice(0, count);
 }
 
-/** Botão "🎉 Participar". */
+/** Botão "Participar" do painel do sorteio. */
 async function handleEntryButton(interaction, giveawayId) {
   const giveaway = stmts.byId.get(Number(giveawayId));
   if (!giveaway || giveaway.ended) {
@@ -76,7 +77,12 @@ async function handleEntryButton(interaction, giveawayId) {
 
   const total = stmts.entryCount.get(giveaway.id).n;
   return interaction.reply({
-    embeds: [successEmbed(`Você entrou no sorteio de **${giveaway.prize}**! (${total} participantes)`, '🎉 Participação confirmada')],
+    embeds: [
+      successEmbed(
+        `Você entrou no sorteio de **${giveaway.prize}**! (${total} participantes)`,
+        `${emoji(interaction.guild, 'giveaway')} Participação confirmada`
+      ),
+    ],
     flags: MessageFlags.Ephemeral,
   });
 }
@@ -100,7 +106,7 @@ async function endGiveaway(client, giveaway) {
         .edit({
           embeds: [
             baseEmbed({
-              title: `🎉 Sorteio encerrado: ${giveaway.prize}`,
+              title: `${emoji(giveaway.guild_id, 'giveaway')} Sorteio encerrado: ${giveaway.prize}`,
               description: `**Vencedor(es):** ${winnersText}`,
               color: colors.warning,
               footer: `ID: ${giveaway.id}`,
@@ -115,7 +121,7 @@ async function endGiveaway(client, giveaway) {
   await channel
     .send(
       winners.length
-        ? `🎉 Parabéns ${winnersText}! Vocês ganharam **${giveaway.prize}**! (Sorteio #${giveaway.id})`
+        ? `${emoji(giveaway.guild_id, 'giveaway_winner')} Parabéns ${winnersText}! Vocês ganharam **${giveaway.prize}**! (Sorteio #${giveaway.id})`
         : `Sorteio de **${giveaway.prize}** encerrado sem participantes. (Sorteio #${giveaway.id})`
     )
     .catch(() => {});
@@ -133,7 +139,7 @@ async function cancelGiveaway(client, giveaway, cancelledBy) {
   if (!channel?.isTextBased()) return;
 
   const notice = baseEmbed({
-    title: `🚫 Sorteio cancelado: ${giveaway.prize}`,
+    title: `${emoji(giveaway.guild_id, 'giveaway_cancel')} Sorteio cancelado: ${giveaway.prize}`,
     description:
       'Este sorteio foi interrompido pela organização e **nenhum vencedor foi sorteado**.\n' +
       'As participações registradas não valem mais.',

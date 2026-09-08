@@ -5,6 +5,7 @@ const { handleStatsPagination } = require('../handlers/ticketStatsHandler');
 const { routeEmbedInteraction } = require('../handlers/embedHandler');
 const { routeWelcomeSetup } = require('../handlers/welcomeSetupHandler');
 const { routeBotStatus } = require('../handlers/botStatusHandler');
+const { routeEmojiConfig } = require('../handlers/emojiConfigHandler');
 const { isOAuthEnabled, createOAuthUrl } = require('../oauth/server');
 const { db, getGuildConfig } = require('../database/db');
 const { errorEmbed, successEmbed } = require('../utils/embeds');
@@ -126,6 +127,11 @@ module.exports = {
       // Painel do /bot-status: rascunho + confirmação, também com modais.
       if (customId.startsWith('bstatus_')) {
         await routeBotStatus(interaction);
+        return;
+      }
+      // Painel do /config-emojis: select abre modal, então cuida do próprio ack.
+      if (customId.startsWith('cfgemoji_')) {
+        await routeEmojiConfig(interaction);
         return;
       }
       if (customId.startsWith('giveaway_enter_')) {

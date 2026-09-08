@@ -3,6 +3,7 @@ const { getGuildConfig } = require('../database/db');
 const { logEvent } = require('../utils/logger');
 const { colors } = require('../config/settings');
 const { getWelcomeConfig, buildWelcomeMessage } = require('../utils/welcomeConfig');
+const { emoji } = require('../utils/emojis');
 
 /** Envia a mensagem de boas-vindas conforme o painel do /setup-welcome. */
 async function sendWelcome(member) {
@@ -33,7 +34,7 @@ module.exports = {
 
     await logEvent(
       member.guild,
-      '📥 Membro entrou',
+      `${emoji(member.guild, 'member_join')} Membro entrou`,
       `${member.user.tag} (${member.id}) entrou no servidor.`,
       colors.success
     );

@@ -1,6 +1,7 @@
 const { Events } = require('discord.js');
 const { logEvent } = require('../utils/logger');
 const { colors } = require('../config/settings');
+const { emoji } = require('../utils/emojis');
 
 module.exports = {
   name: Events.MessageUpdate,
@@ -10,7 +11,7 @@ module.exports = {
 
     await logEvent(
       newMessage.guild,
-      '✏️ Mensagem editada',
+      `${emoji(newMessage.guild, 'message_edit')} Mensagem editada`,
       [
         `**Autor:** ${newMessage.author.tag}`,
         `**Canal:** ${newMessage.channel} — [ir para mensagem](${newMessage.url})`,

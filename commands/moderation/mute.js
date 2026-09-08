@@ -4,6 +4,7 @@ const ms = require('ms');
 const { successEmbed, errorEmbed } = require('../../utils/embeds');
 const { logEvent } = require('../../utils/logger');
 const { colors } = require('../../config/settings');
+const { emoji } = require('../../utils/emojis');
 
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000; // limite do Discord: 28 dias
 
@@ -42,12 +43,13 @@ module.exports = {
 
     await member.timeout(duration, `${reason} — por ${interaction.user.tag}`);
 
-    await logEvent(interaction.guild, '🔇 Mute aplicado',
+    const icon = emoji(interaction.guild, 'mute');
+    await logEvent(interaction.guild, `${icon} Mute aplicado`,
       `**Usuário:** ${user.tag} (${user.id})\n**Moderador:** ${interaction.user.tag}\n**Duração:** ${durationRaw}\n**Motivo:** ${reason}`,
       colors.warning);
 
     return respond(interaction, {
-      embeds: [successEmbed(`**${user.tag}** silenciado por **${durationRaw}**.\n**Motivo:** ${reason}`, '🔇 Silenciado')],
+      embeds: [successEmbed(`**${user.tag}** silenciado por **${durationRaw}**.\n**Motivo:** ${reason}`, `${icon} Silenciado`)],
     });
   },
 };

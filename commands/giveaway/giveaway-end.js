@@ -7,6 +7,7 @@ const {
   findGuildGiveaway,
   listOpenGiveaways,
 } = require('../../handlers/giveawayHandler');
+const { emoji } = require('../../utils/emojis');
 
 module.exports = {
   ephemeral: true,
@@ -35,7 +36,10 @@ module.exports = {
         embeds: [
           open.length
             ? errorEmbed('Sorteio não encontrado. Escolha uma das opções sugeridas pelo autocomplete.')
-            : infoEmbed('Não há nenhum sorteio em andamento neste servidor.', '🎉 Sorteios'),
+            : infoEmbed(
+              'Não há nenhum sorteio em andamento neste servidor.',
+              `${emoji(interaction.guild, 'giveaway')} Sorteios`
+            ),
         ],
       });
     }
@@ -59,7 +63,7 @@ module.exports = {
         successEmbed(
           `Sorteio **#${giveaway.id}** (${giveaway.prize}) encerrado antecipadamente.\n` +
             `O resultado foi anunciado em <#${giveaway.channel_id}>.`,
-          '🎉 Sorteio encerrado'
+          `${emoji(interaction.guild, 'giveaway')} Sorteio encerrado`
         ),
       ],
     });

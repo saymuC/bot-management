@@ -5,6 +5,7 @@ const ms = require('ms');
 const dayjs = require('dayjs');
 const { db } = require('../../database/db');
 const { baseEmbed, successEmbed, errorEmbed } = require('../../utils/embeds');
+const { emoji } = require('../../utils/emojis');
 
 const insertGiveaway = db.prepare(
   'INSERT INTO giveaways (guild_id, channel_id, prize, winners_count, host_id, ends_at) VALUES (?, ?, ?, ?, ?, ?)'
@@ -46,10 +47,11 @@ module.exports = {
     );
     const giveawayId = result.lastInsertRowid;
 
+    const icon = emoji(interaction.guild, 'giveaway');
     const message = await interaction.channel.send({
       embeds: [
         baseEmbed({
-          title: `🎉 Sorteio: ${prize}`,
+          title: `${icon} Sorteio: ${prize}`,
           description: [
             `**Vencedores:** ${winnersCount}`,
             `**Encerra:** <t:${endsAtUnix}:R> (<t:${endsAtUnix}:f>)`,
@@ -65,7 +67,7 @@ module.exports = {
           new ButtonBuilder()
             .setCustomId(`giveaway_enter_${giveawayId}`)
             .setLabel('Participar')
-            .setEmoji('🎉')
+            .setEmoji(icon)
             .setStyle(ButtonStyle.Success)
         ),
       ],

@@ -120,6 +120,7 @@ function ensureColumn(table, column, definition) {
 
 ensureColumn('guild_config', 'ticket_log_channel_id', 'TEXT');
 ensureColumn('guild_config', 'welcome_config', 'TEXT');
+ensureColumn('guild_config', 'emoji_config', 'TEXT');
 ensureColumn('tickets', 'claimed_at', 'TEXT');
 ensureColumn('tickets', 'closed_by', 'TEXT');
 ensureColumn('giveaways', 'cancelled', 'INTEGER DEFAULT 0');
@@ -134,7 +135,7 @@ const upsertConfigField = (field) =>
 
 // campos permitidos — nunca interpolar entrada do usuário aqui
 const CONFIG_FIELDS = [
-  'welcome_channel_id', 'welcome_message', 'welcome_config', 'log_channel_id',
+  'welcome_channel_id', 'welcome_message', 'welcome_config', 'emoji_config', 'log_channel_id',
   'ticket_category_id', 'ticket_panel_channel_id', 'ticket_log_channel_id',
   'verify_channel_id', 'verify_role_id', 'autorole_id', 'mute_role_id',
 ];

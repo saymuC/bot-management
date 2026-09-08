@@ -3,6 +3,7 @@ const { respond } = require('../../utils/interactions');
 const { successEmbed, errorEmbed } = require('../../utils/embeds');
 const { logEvent } = require('../../utils/logger');
 const { colors } = require('../../config/settings');
+const { emoji } = require('../../utils/emojis');
 
 module.exports = {
   ephemeral: false,
@@ -28,9 +29,12 @@ module.exports = {
 
     await member.kick(`${reason} — por ${interaction.user.tag}`);
 
-    await logEvent(interaction.guild, '👢 Kick aplicado',
+    const icon = emoji(interaction.guild, 'kick');
+    await logEvent(interaction.guild, `${icon} Kick aplicado`,
       `**Usuário:** ${user.tag} (${user.id})\n**Moderador:** ${interaction.user.tag}\n**Motivo:** ${reason}`, colors.warning);
 
-    return respond(interaction, { embeds: [successEmbed(`**${user.tag}** foi expulso.\n**Motivo:** ${reason}`, '👢 Expulso')] });
+    return respond(interaction, {
+      embeds: [successEmbed(`**${user.tag}** foi expulso.\n**Motivo:** ${reason}`, `${icon} Expulso`)],
+    });
   },
 };

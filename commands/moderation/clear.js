@@ -3,6 +3,7 @@ const { respond } = require('../../utils/interactions');
 const { successEmbed, errorEmbed } = require('../../utils/embeds');
 const { logEvent } = require('../../utils/logger');
 const { colors } = require('../../config/settings');
+const { emoji } = require('../../utils/emojis');
 
 module.exports = {
   ephemeral: true,
@@ -25,12 +26,13 @@ module.exports = {
       });
     }
 
-    await logEvent(interaction.guild, '🧹 Mensagens apagadas',
+    const icon = emoji(interaction.guild, 'clear');
+    await logEvent(interaction.guild, `${icon} Mensagens apagadas`,
       `**Canal:** ${interaction.channel}\n**Quantidade:** ${deleted.size}\n**Moderador:** ${interaction.user.tag}`,
       colors.info);
 
     return respond(interaction, {
-      embeds: [successEmbed(`${deleted.size} mensagens apagadas.`, '🧹 Limpeza concluída')],
+      embeds: [successEmbed(`${deleted.size} mensagens apagadas.`, `${icon} Limpeza concluída`)],
     });
   },
 };

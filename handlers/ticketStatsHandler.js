@@ -2,6 +2,7 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { db } = require('../database/db');
 const { baseEmbed, infoEmbed } = require('../utils/embeds');
 const { formatDuration } = require('../utils/time');
+const { emoji } = require('../utils/emojis');
 
 const PAGE_SIZE = 10;
 
@@ -45,16 +46,16 @@ const summaryQuery = db.prepare(`
        WHERE guild_id = @guild AND claimed_at IS NOT NULL AND closed_at IS NOT NULL) AS avg_handle_seconds
 `);
 
-/** "⭐ 4.75 (12)" ou "sem avaliações". */
-function formatRating(avgStars, ratings) {
+/** "⭐ 4.75 (12)" ou "sem avaliações" — a estrela vem do /config-emojis. */
+function formatRating(avgStars, ratings, star) {
   if (!ratings) return 'sem avaliações';
-  return `⭐ **${avgStars.toFixed(2)}**/5 (${ratings} ${ratings === 1 ? 'avaliação' : 'avaliações'})`;
+  return `${star} **${avgStars.toFixed(2)}**/5 (${ratings} ${ratings === 1 ? 'avaliação' : 'avaliações'})`;
 }
 
-function formatAgentLine(row, position) {
+function formatAgentLine(row, position, star) {
   const tma = row.avg_handle_seconds == null ? '—' : formatDuration(row.avg_handle_seconds * 1000);
   return [
-    `**${position}.** <@${row.agent_id}> — ${formatRating(row.avg_stars, row.ratings)}`,
+    `**${position}.** <@${row.agent_id}> — ${formatRating(row.avg_stars, row.ratings, star)}`,
     `└ Reivindicados: **${row.claimed}** · Fechados: **${row.closed}** · TMA: **${tma}**`,
   ].join('\n');
 }
@@ -99,17 +100,20 @@ function buildStatsPage(guildId, requestedPage = 0) {
   const page = Math.min(Math.max(requestedPage, 0), totalPages - 1);
   const slice = rows.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
 
+  const star = emoji(guildId, 'ticket_rating');
   const summary = summaryQuery.get({ guild: guildId });
   const globalTma =
     summary.avg_handle_seconds == null ? '—' : formatDuration(summary.avg_handle_seconds * 1000);
 
   const embed = baseEmbed({
     title: '📊 Desempenho dos atendentes',
-    description: slice.map((row, index) => formatAgentLine(row, page * PAGE_SIZE + index + 1)).join('\n\n'),
+    description: slice
+      .map((row, index) => formatAgentLine(row, page * PAGE_SIZE + index + 1, star))
+      .join('\n\n'),
     fields: [
       { name: 'Atendentes', value: String(rows.length), inline: true },
       { name: 'Tickets', value: `${summary.total} (${summary.open} abertos)`, inline: true },
-      { name: 'Nota média geral', value: formatRating(summary.avg_stars, summary.ratings), inline: true },
+      { name: 'Nota média geral', value: formatRating(summary.avg_stars, summary.ratings, star), inline: true },
       { name: 'TMA geral', value: globalTma, inline: true },
     ],
     footer: `Ordenado por nota média · página ${page + 1} de ${totalPages}`,

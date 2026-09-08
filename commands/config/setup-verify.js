@@ -3,6 +3,7 @@ const {
 const { respond } = require('../../utils/interactions');
 const { setGuildConfig } = require('../../database/db');
 const { baseEmbed, successEmbed, errorEmbed } = require('../../utils/embeds');
+const { emoji } = require('../../utils/emojis');
 
 module.exports = {
   ephemeral: true,
@@ -29,16 +30,17 @@ module.exports = {
     setGuildConfig(interaction.guild.id, 'verify_channel_id', channel.id);
     setGuildConfig(interaction.guild.id, 'verify_role_id', role.id);
 
+    const icon = emoji(interaction.guild, 'verify');
     await channel.send({
       embeds: [
         baseEmbed({
-          title: '✅ Verificação',
+          title: `${icon} Verificação`,
           description: 'Clique no botão abaixo para se verificar e liberar o acesso ao servidor.',
         }),
       ],
       components: [
         new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('verify_button').setLabel('Verificar').setEmoji('✅').setStyle(ButtonStyle.Success)
+          new ButtonBuilder().setCustomId('verify_button').setLabel('Verificar').setEmoji(icon).setStyle(ButtonStyle.Success)
         ),
       ],
     });

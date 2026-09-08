@@ -4,6 +4,7 @@ const { successEmbed, errorEmbed } = require('../../utils/embeds');
 const { addUserToGuild, isOAuthEnabled } = require('../../oauth/server');
 const { logEvent } = require('../../utils/logger');
 const { colors } = require('../../config/settings');
+const { emoji } = require('../../utils/emojis');
 
 module.exports = {
   ephemeral: true,
@@ -28,7 +29,7 @@ module.exports = {
       return respond(interaction, { embeds: [errorEmbed(`Não foi possível adicionar **${user.tag}**: ${result.reason}`)] });
     }
 
-    await logEvent(interaction.guild, '➕ Usuário adicionado via OAuth',
+    await logEvent(interaction.guild, `${emoji(interaction.guild, 'member_add_oauth')} Usuário adicionado via OAuth`,
       `**Usuário:** ${user.tag} (${user.id})\n**Por:** ${interaction.user.tag}`, colors.info);
 
     return respond(interaction, {

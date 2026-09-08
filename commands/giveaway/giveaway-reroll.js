@@ -3,6 +3,7 @@ const { respond } = require('../../utils/interactions');
 const { db } = require('../../database/db');
 const { errorEmbed } = require('../../utils/embeds');
 const { pickWinners } = require('../../handlers/giveawayHandler');
+const { emoji } = require('../../utils/emojis');
 
 const getGiveaway = db.prepare('SELECT * FROM giveaways WHERE id = ? AND guild_id = ?');
 
@@ -42,7 +43,7 @@ module.exports = {
     }
 
     return respond(interaction, 
-      `🎉 **Reroll do sorteio #${giveaway.id}** (${giveaway.prize}):\nNovo(s) vencedor(es): ${winners.map((w) => `<@${w}>`).join(', ')}`
+      `${emoji(interaction.guild, 'giveaway_winner')} **Reroll do sorteio #${giveaway.id}** (${giveaway.prize}):\nNovo(s) vencedor(es): ${winners.map((w) => `<@${w}>`).join(', ')}`
     );
   },
 };

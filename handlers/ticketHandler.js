@@ -15,6 +15,7 @@ const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
 const { fetchChannelHistory, buildHtmlTranscript } = require('../utils/transcript');
 const { durationBetween, formatDuration, parseSqlDate } = require('../utils/time');
 const { colors, ticket: ticketSettings } = require('../config/settings');
+const { emoji } = require('../utils/emojis');
 
 const stmts = {
   categories: db.prepare('SELECT * FROM ticket_categories WHERE guild_id = ?'),
@@ -45,14 +46,17 @@ const STAR_LABELS = {
   5: 'Excelente',
 };
 
-/** Botão inicial do painel de tickets. */
-function buildPanelComponents() {
+/**
+ * Botão inicial do painel de tickets.
+ * @param {import('discord.js').Guild} guild dono do painel — define o emoji usado
+ */
+function buildPanelComponents(guild) {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('ticket_open')
         .setLabel('Abrir Ticket')
-        .setEmoji('🎫')
+        .setEmoji(emoji(guild, 'ticket'))
         .setStyle(ButtonStyle.Primary)
     ),
   ];
@@ -103,12 +107,17 @@ async function handleOpenButton(interaction) {
       categories.slice(0, 25).map((cat) => ({
         label: cat.label,
         value: String(cat.id),
-        emoji: cat.emoji || '🎫',
+        emoji: cat.emoji || emoji(interaction.guild, 'ticket'),
       }))
     );
 
   return interaction.reply({
-    embeds: [baseEmbed({ title: '🎫 Abrir Ticket', description: 'Escolha a categoria do seu atendimento:' })],
+    embeds: [
+      baseEmbed({
+        title: `${emoji(interaction.guild, 'ticket')} Abrir Ticket`,
+        description: 'Escolha a categoria do seu atendimento:',
+      }),
+    ],
     components: [new ActionRowBuilder().addComponents(menu)],
     flags: MessageFlags.Ephemeral,
   });
@@ -179,12 +188,12 @@ async function handleCategorySelect(interaction) {
     new ButtonBuilder()
       .setCustomId(`ticket_claim_${ticketId}`)
       .setLabel('Reivindicar')
-      .setEmoji('🙋')
+      .setEmoji(emoji(interaction.guild, 'ticket_claim'))
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`ticket_close_${ticketId}`)
       .setLabel('Fechar')
-      .setEmoji('🔒')
+      .setEmoji(emoji(interaction.guild, 'ticket_close'))
       .setStyle(ButtonStyle.Danger)
   );
 
@@ -193,7 +202,7 @@ async function handleCategorySelect(interaction) {
     content: `${interaction.user} ${mention}`.trim(),
     embeds: [
       baseEmbed({
-        title: `${category.emoji || '🎫'} ${category.label} — Ticket #${ticketId}`,
+        title: `${category.emoji || emoji(interaction.guild, 'ticket')} ${category.label} — Ticket #${ticketId}`,
         description:
           'Descreva seu problema com o máximo de detalhes.\nA equipe de suporte irá te atender em breve.',
         footer: `Aberto por ${interaction.user.tag}`,
@@ -207,7 +216,7 @@ async function handleCategorySelect(interaction) {
     ?.send({
       embeds: [
         baseEmbed({
-          title: '🎫 Ticket aberto',
+          title: `${emoji(interaction.guild, 'ticket')} Ticket aberto`,
           description: `Ticket **#${ticketId}** (**${category.label}**) aberto por ${interaction.user} em ${channel}.`,
           color: colors.info,
           fields: [{ name: 'Autor', value: `${interaction.user} (\`${interaction.user.id}\`)`, inline: true }],
@@ -243,8 +252,14 @@ async function handleClaim(interaction, ticketId) {
 
   stmts.claim.run(interaction.user.id, ticket.id);
 
+  const claimIcon = emoji(interaction.guild, 'ticket_claim');
   await interaction.reply({
-    embeds: [successEmbed(`${interaction.user} reivindicou este ticket e será o responsável pelo atendimento.`, '🙋 Ticket reivindicado')],
+    embeds: [
+      successEmbed(
+        `${interaction.user} reivindicou este ticket e será o responsável pelo atendimento.`,
+        `${claimIcon} Ticket reivindicado`
+      ),
+    ],
   });
 
   const logChannel = await resolveTicketLogChannel(interaction.guild);
@@ -252,7 +267,7 @@ async function handleClaim(interaction, ticketId) {
     ?.send({
       embeds: [
         baseEmbed({
-          title: '🙋 Ticket reivindicado',
+          title: `${claimIcon} Ticket reivindicado`,
           description: `Ticket #${ticket.id} (**${ticket.category_label}**) de <@${ticket.user_id}>.`,
           color: colors.info,
           fields: [
@@ -269,13 +284,18 @@ async function handleClaim(interaction, ticketId) {
     .catch((err) => console.error('[tickets] Falha ao logar claim:', err.message));
 }
 
-/** Monta o pedido de avaliação enviado na DM do autor do ticket. */
-function buildRatingRequest(ticket, guildName) {
+/**
+ * Monta o pedido de avaliação enviado na DM do autor do ticket.
+ * @param {import('discord.js').Guild} guild servidor do ticket — define o emoji das estrelas
+ */
+function buildRatingRequest(ticket, guild) {
+  const star = emoji(guild, 'ticket_rating');
+
   const buttons = new ActionRowBuilder().addComponents(
     [1, 2, 3, 4, 5].map((stars) =>
       new ButtonBuilder()
         .setCustomId(`ticket_rate_${ticket.id}_${stars}`)
-        .setEmoji('⭐')
+        .setEmoji(star)
         .setLabel(String(stars))
         .setStyle(ButtonStyle.Secondary)
     )
@@ -284,9 +304,9 @@ function buildRatingRequest(ticket, guildName) {
   return {
     embeds: [
       baseEmbed({
-        title: '⭐ Avalie seu atendimento',
+        title: `${star} Avalie seu atendimento`,
         description:
-          `Seu ticket **#${ticket.id}** (${ticket.category_label ?? 'sem categoria'}) em **${guildName}** foi encerrado.\n\n` +
+          `Seu ticket **#${ticket.id}** (${ticket.category_label ?? 'sem categoria'}) em **${guild.name}** foi encerrado.\n\n` +
           `Como você avalia o atendimento de <@${ticket.claimed_by}>?\n` +
           'Escolha de 1 a 5 estrelas abaixo — em seguida você poderá deixar um comentário opcional.',
         color: colors.primary,
@@ -304,7 +324,13 @@ async function handleClose(interaction, ticketId) {
   }
 
   await interaction.reply({
-    embeds: [baseEmbed({ title: '🔒 Fechando ticket', description: 'Gerando transcript e arquivando em 5 segundos...', color: colors.warning })],
+    embeds: [
+      baseEmbed({
+        title: `${emoji(interaction.guild, 'ticket_close')} Fechando ticket`,
+        description: 'Gerando transcript e arquivando em 5 segundos...',
+        color: colors.warning,
+      }),
+    ],
   });
 
   stmts.close.run(interaction.user.id, ticket.id);
@@ -344,7 +370,7 @@ async function handleClose(interaction, ticketId) {
       .send({
         embeds: [
           baseEmbed({
-            title: '🔒 Ticket fechado',
+            title: `${emoji(interaction.guild, 'ticket_close')} Ticket fechado`,
             description: `Ticket **#${closed.id}** (**${closed.category_label}**) de <@${closed.user_id}>.`,
             color: colors.warning,
             fields: [
@@ -366,7 +392,7 @@ async function handleClose(interaction, ticketId) {
   if (closed.claimed_by) {
     const author = await interaction.client.users.fetch(closed.user_id).catch(() => null);
     await author
-      ?.send(buildRatingRequest(closed, interaction.guild.name))
+      ?.send(buildRatingRequest(closed, interaction.guild))
       .catch(() => console.log(`[tickets] DM de avaliação bloqueada pelo usuário ${closed.user_id}.`));
   }
 
@@ -420,6 +446,8 @@ async function handleRatingModal(interaction, payload) {
   }
 
   const comment = interaction.fields.getTextInputValue('comment').trim() || null;
+  // A DM não tem guild na interação; o id do ticket é o que liga a avaliação ao servidor.
+  const star = emoji(ticket.guild_id, 'ticket_rating');
 
   try {
     stmts.insertRating.run(ticket.guild_id, ticket.id, ticket.claimed_by, interaction.user.id, stars, comment);
@@ -435,9 +463,9 @@ async function handleRatingModal(interaction, payload) {
   await interaction.reply({
     embeds: [
       successEmbed(
-        `Avaliação registrada: ${'⭐'.repeat(stars)} (${STAR_LABELS[stars]}).\n` +
+        `Avaliação registrada: ${star.repeat(stars)} (${STAR_LABELS[stars]}).\n` +
           (comment ? 'Seu comentário foi enviado à equipe.' : 'Obrigado pelo retorno!'),
-        '⭐ Obrigado pela avaliação'
+        `${star} Obrigado pela avaliação`
       ),
     ],
   });
@@ -453,12 +481,12 @@ async function handleRatingModal(interaction, payload) {
     ?.send({
       embeds: [
         baseEmbed({
-          title: '⭐ Atendimento avaliado',
+          title: `${star} Atendimento avaliado`,
           description: `Ticket **#${ticket.id}** (**${ticket.category_label}**) avaliado por <@${ticket.user_id}>.`,
           color: stars >= 4 ? colors.success : stars <= 2 ? colors.error : colors.warning,
           fields: [
             { name: 'Atendente', value: `<@${ticket.claimed_by}>`, inline: true },
-            { name: 'Nota', value: `${'⭐'.repeat(stars)} ${stars}/5 — ${STAR_LABELS[stars]}`, inline: true },
+            { name: 'Nota', value: `${star.repeat(stars)} ${stars}/5 — ${STAR_LABELS[stars]}`, inline: true },
             { name: 'Comentário', value: comment ?? '*sem comentário*', inline: false },
           ],
         }),
