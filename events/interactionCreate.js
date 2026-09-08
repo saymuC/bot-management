@@ -2,6 +2,7 @@ const { Events, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = r
 const { routeTicketInteraction } = require('../handlers/ticketHandler');
 const { handleEntryButton } = require('../handlers/giveawayHandler');
 const { handleStatsPagination } = require('../handlers/ticketStatsHandler');
+const { routeEmbedInteraction } = require('../handlers/embedHandler');
 const { isOAuthEnabled, createOAuthUrl } = require('../oauth/server');
 const { db, getGuildConfig } = require('../database/db');
 const { errorEmbed, successEmbed } = require('../utils/embeds');
@@ -102,6 +103,11 @@ module.exports = {
       // Paginação do /ticket-stats: edita a própria mensagem, sem defer.
       if (customId.startsWith('tstats_')) {
         await handleStatsPagination(interaction, customId.slice('tstats_'.length));
+        return;
+      }
+      // Preview do /embed: o botão Editar abre um modal, que não admite defer antes.
+      if (customId.startsWith('embedp_')) {
+        await routeEmbedInteraction(interaction);
         return;
       }
       if (customId.startsWith('giveaway_enter_')) {
