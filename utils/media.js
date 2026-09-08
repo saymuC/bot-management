@@ -16,8 +16,6 @@ const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'mkv'];
 const UNFURL_HOSTS = [
   'youtube.com',
   'youtu.be',
-  'tenor.com',
-  'giphy.com',
   'streamable.com',
   'twitch.tv',
   'vimeo.com',
