@@ -44,11 +44,11 @@ const ACTIVITIES = Object.freeze({
     hint: 'Competindo em <nome>',
   },
   streaming: {
-    label: 'Transmitindo (título clicável)',
-    emoji: '🔴',
+    label: 'Transmitindo — bolinha roxa de live',
+    emoji: '🟣',
     type: ActivityType.Streaming,
     prefix: 'Transmitindo',
-    hint: 'Único tipo em que o título vira link. Só Twitch e YouTube.',
+    hint: 'Deixa o bot roxo/em live e o título clicável. EXIGE URL de Twitch ou YouTube.',
   },
 });
 
@@ -160,7 +160,9 @@ function presenceWarnings(config) {
     warnings.push('Sem texto o bot fica **sem atividade nenhuma** — preencha o nome em “Textos”.');
   }
   if (normalized.activity === 'streaming' && !isStreamUrl(normalized.url)) {
-    warnings.push('`Transmitindo` sem URL de **Twitch/YouTube** não vira link clicável.');
+    warnings.push(
+      'Sem URL de **Twitch/YouTube** o bot **não fica roxo** nem clicável — o Discord rejeita qualquer outro domínio (inclusive `discord.gg`).'
+    );
   }
   if (normalized.activity !== 'streaming' && normalized.url) {
     warnings.push('O link só é usado no tipo `Transmitindo`; nos outros o Discord o ignora.');

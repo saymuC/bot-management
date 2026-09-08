@@ -97,11 +97,10 @@ function panelEmbed(draft, applied) {
   if (warnings.length) fields.push({ name: '⚠️ Atenção', value: warnings.map((w) => `• ${w}`).join('\n') });
 
   fields.push({
-    name: '🔘 Sobre botões na atividade',
+    name: '🟣 Bolinha roxa (em live) e botões',
     value:
-      'A API do Discord permite que **bots** definam apenas `nome`, `linha extra`, `tipo` e `url`.\n' +
-      'Botões de Rich Presence e imagens são ignorados para bots — o único elemento **clicável** é o tipo ' +
-      '`Transmitindo`, em que o título vira link (só `twitch.tv` e `youtube.com`).',
+      'O roxo **não** é uma opção de disponibilidade: sai do tipo `🟣 Transmitindo` **junto com** uma URL de ' +
+      '`twitch.tv` ou `youtube.com`. Sem URL válida (um `discord.gg`, por exemplo) o bot fica normal.'
   });
 
   return baseEmbed({
