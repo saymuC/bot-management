@@ -4,6 +4,7 @@ const { handleEntryButton } = require('../handlers/giveawayHandler');
 const { handleStatsPagination } = require('../handlers/ticketStatsHandler');
 const { routeEmbedInteraction } = require('../handlers/embedHandler');
 const { routeWelcomeSetup } = require('../handlers/welcomeSetupHandler');
+const { routeBotStatus } = require('../handlers/botStatusHandler');
 const { isOAuthEnabled, createOAuthUrl } = require('../oauth/server');
 const { db, getGuildConfig } = require('../database/db');
 const { errorEmbed, successEmbed } = require('../utils/embeds');
@@ -114,6 +115,11 @@ module.exports = {
       // Painel do /setup-welcome: também abre modais e gerencia o próprio ack.
       if (customId.startsWith('wsetup_')) {
         await routeWelcomeSetup(interaction);
+        return;
+      }
+      // Painel do /bot-status: rascunho + confirmação, também com modais.
+      if (customId.startsWith('bstatus_')) {
+        await routeBotStatus(interaction);
         return;
       }
       if (customId.startsWith('giveaway_enter_')) {
