@@ -3,6 +3,7 @@ const { routeTicketInteraction } = require('../handlers/ticketHandler');
 const { handleEntryButton } = require('../handlers/giveawayHandler');
 const { handleStatsPagination } = require('../handlers/ticketStatsHandler');
 const { routeEmbedInteraction } = require('../handlers/embedHandler');
+const { routeWelcomeSetup } = require('../handlers/welcomeSetupHandler');
 const { isOAuthEnabled, createOAuthUrl } = require('../oauth/server');
 const { db, getGuildConfig } = require('../database/db');
 const { errorEmbed, successEmbed } = require('../utils/embeds');
@@ -108,6 +109,11 @@ module.exports = {
       // Preview do /embed: o botão Editar abre um modal, que não admite defer antes.
       if (customId.startsWith('embedp_')) {
         await routeEmbedInteraction(interaction);
+        return;
+      }
+      // Painel do /setup-welcome: também abre modais e gerencia o próprio ack.
+      if (customId.startsWith('wsetup_')) {
+        await routeWelcomeSetup(interaction);
         return;
       }
       if (customId.startsWith('giveaway_enter_')) {

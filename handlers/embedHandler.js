@@ -12,6 +12,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   ChannelSelectMenuBuilder,
+  StringSelectMenuBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -19,7 +20,8 @@ const {
   MessageFlags,
 } = require('discord.js');
 
-const { baseEmbed, successEmbed, errorEmbed, parseHexColor } = require('../utils/embeds');
+const { baseEmbed, successEmbed, errorEmbed } = require('../utils/embeds');
+const { resolveColor, describeColor, colorSelectOptions } = require('../utils/colors');
 const { getDraft, updateDraft, deleteDraft } = require('../utils/embedDrafts');
 const { classifyUrl } = require('../utils/media');
 const { POST_EMBED_PERMS_LABEL, TEXT_CHANNEL_TYPES, canPostEmbed, resolveTextChannel } = require('../utils/channelPerms');
@@ -86,6 +88,12 @@ function previewComponents(draft) {
         .addChannelTypes(...TEXT_CHANNEL_TYPES)
         .setDefaultChannels(draft.channelId)
     ),
+    new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`${PREFIX}color_${draft.id}`)
+        .setPlaceholder(`🎨 Cor do embed — atual: ${describeColor(draft.colorHex)}`)
+        .addOptions(colorSelectOptions(draft.colorHex))
+    ),
     new ActionRowBuilder().addComponents(actions),
   ];
 }
@@ -95,7 +103,7 @@ function draftEmbed(draft, image) {
   return baseEmbed({
     title: draft.title,
     description: draft.description,
-    color: parseHexColor(draft.colorHex) ?? undefined,
+    color: resolveColor(draft.colorHex) ?? undefined,
     footer: draft.footer || undefined,
     image,
   });
@@ -196,6 +204,16 @@ function handleClearMedia(interaction, draft) {
   return safeAck(interaction, () => interaction.update(buildPreviewPayload(updated, '🚫 Mídia removida.')));
 }
 
+/** Troca a cor do embed pela paleta nomeada. */
+function handleColorSelect(interaction, draft) {
+  const colorHex = interaction.values[0];
+  const updated = updateDraft(draft.id, { colorHex });
+  if (!updated) return replyExpired(interaction);
+  return safeAck(interaction, () =>
+    interaction.update(buildPreviewPayload(updated, `🎨 Cor alterada para ${describeColor(colorHex)}.`))
+  );
+}
+
 /** Troca o canal de destino via select menu, validando as permissões do bot. */
 async function handleChannelSelect(interaction, draft) {
   const channel = interaction.channels.first();
@@ -236,9 +254,10 @@ function handleEdit(interaction, draft) {
       .setValue(draft.description),
     new TextInputBuilder()
       .setCustomId('cor')
-      .setLabel('Cor hex (ex: #5865F2)')
+      .setLabel('Cor: nome ou hex')
+      .setPlaceholder('azul, verde, fucsia... ou #5865F2 (ou use o seletor 🎨)')
       .setStyle(TextInputStyle.Short)
-      .setMaxLength(7)
+      .setMaxLength(30)
       .setRequired(false)
       .setValue(draft.colorHex ?? ''),
     new TextInputBuilder()
@@ -318,8 +337,8 @@ async function handleModalSubmit(interaction, draft) {
 
   let colorHex = null;
   if (colorRaw) {
-    if (parseHexColor(colorRaw) === null) {
-      warnings.push('Cor inválida (use o formato `#5865F2`) — a cor anterior foi mantida.');
+    if (resolveColor(colorRaw) === null) {
+      warnings.push('Cor não reconhecida (use um nome como `azul` ou um hex `#5865F2`) — a cor anterior foi mantida.');
       colorHex = draft.colorHex ?? null;
     } else {
       colorHex = colorRaw;
@@ -387,6 +406,8 @@ async function routeEmbedInteraction(interaction) {
       return handleClearMedia(interaction, draft);
     case 'channel':
       return handleChannelSelect(interaction, draft);
+    case 'color':
+      return handleColorSelect(interaction, draft);
     case 'modal':
       return handleModalSubmit(interaction, draft);
     default:

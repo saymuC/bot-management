@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
 const { respond } = require('../../utils/interactions');
-const { errorEmbed, parseHexColor } = require('../../utils/embeds');
+const { errorEmbed } = require('../../utils/embeds');
+const { resolveColor, colorAutocomplete } = require('../../utils/colors');
 const { createDraft, getDraft } = require('../../utils/embedDrafts');
 const { buildPreviewPayload, EMPTY_MEDIA } = require('../../handlers/embedHandler');
 const { classifyAttachment, classifyUrl } = require('../../utils/media');
@@ -33,7 +34,12 @@ module.exports = {
         .setDescription('Canal de destino (padrão: atual)')
         .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
     )
-    .addStringOption((opt) => opt.setName('cor').setDescription('Cor hex (ex: #5865F2)'))
+    .addStringOption((opt) =>
+      opt
+        .setName('cor')
+        .setDescription('Nome da cor (azul, verde, fúcsia...) ou hex (#5865F2)')
+        .setAutocomplete(true)
+    )
     .addAttachmentOption((opt) =>
       opt.setName('anexo').setDescription('Arquivo de imagem, GIF ou vídeo para acompanhar o embed')
     )
@@ -41,6 +47,12 @@ module.exports = {
       opt.setName('midia_url').setDescription('Link de imagem, GIF ou vídeo (alternativa ao anexo)')
     )
     .addStringOption((opt) => opt.setName('rodape').setDescription('Texto pequeno no pé do embed').setMaxLength(2048)),
+
+  /** Sugere as cores da paleta enquanto a pessoa digita. */
+  async autocomplete(interaction) {
+    if (interaction.options.getFocused(true).name !== 'cor') return interaction.respond([]);
+    return interaction.respond(colorAutocomplete(interaction.options.getFocused()));
+  },
 
   async execute(interaction) {
     const title = interaction.options.getString('titulo', true);
@@ -51,8 +63,10 @@ module.exports = {
     const mediaUrlRaw = interaction.options.getString('midia_url');
     const footer = interaction.options.getString('rodape');
 
-    if (colorRaw && parseHexColor(colorRaw) === null) {
-      return respond(interaction, { embeds: [errorEmbed('Cor inválida. Use o formato hex, ex: `#5865F2`.')] });
+    if (colorRaw && resolveColor(colorRaw) === null) {
+      return respond(interaction, {
+        embeds: [errorEmbed('Cor não reconhecida. Use um nome da lista (ex: `azul`) ou um hex (ex: `#5865F2`).')],
+      });
     }
 
     if (!canPostEmbed(channel, interaction.guild)) {

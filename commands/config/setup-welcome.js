@@ -1,37 +1,18 @@
-const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('discord.js');
+const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { respond } = require('../../utils/interactions');
-const { setGuildConfig } = require('../../database/db');
-const { successEmbed } = require('../../utils/embeds');
+const { getWelcomeConfig } = require('../../utils/welcomeConfig');
+const { buildPanelPayload } = require('../../handlers/welcomeSetupHandler');
 
 module.exports = {
   ephemeral: true,
   data: new SlashCommandBuilder()
     .setName('setup-welcome')
-    .setDescription('Configura as mensagens de boas-vindas')
+    .setDescription('Abre o painel de configuração das mensagens de boas-vindas')
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-    .setDMPermission(false)
-    .addChannelOption((opt) =>
-      opt.setName('canal').setDescription('Canal das boas-vindas').setRequired(true).addChannelTypes(ChannelType.GuildText)
-    )
-    .addStringOption((opt) =>
-      opt.setName('mensagem').setDescription('Mensagem. Placeholders: {user} {username} {server} {membercount}').setMaxLength(1000)
-    ),
+    .setDMPermission(false),
 
   async execute(interaction) {
-    const channel = interaction.options.getChannel('canal', true);
-    const message = interaction.options.getString('mensagem');
-
-    setGuildConfig(interaction.guild.id, 'welcome_channel_id', channel.id);
-    if (message) setGuildConfig(interaction.guild.id, 'welcome_message', message);
-
-    return respond(interaction, {
-      embeds: [
-        successEmbed(
-          `Boas-vindas configuradas em ${channel}.\n` +
-            (message ? `**Mensagem:** ${message}` : 'Usando a mensagem padrão.') +
-            '\n\nPlaceholders: `{user}` `{username}` `{server}` `{membercount}`'
-        ),
-      ],
-    });
+    const config = getWelcomeConfig(interaction.guild.id);
+    return respond(interaction, buildPanelPayload(config, interaction.member));
   },
 };

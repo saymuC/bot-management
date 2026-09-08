@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS guild_config (
   guild_id TEXT PRIMARY KEY,
   welcome_channel_id TEXT,
   welcome_message TEXT,
+  welcome_config TEXT,
   log_channel_id TEXT,
   ticket_category_id TEXT,
   ticket_panel_channel_id TEXT,
@@ -18,6 +19,12 @@ CREATE TABLE IF NOT EXISTS guild_config (
   verify_role_id TEXT,
   autorole_id TEXT,
   mute_role_id TEXT
+);
+
+-- Configuração global do bot (não é por servidor). Ex.: presença/status.
+CREATE TABLE IF NOT EXISTS bot_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ticket_categories (
@@ -112,6 +119,7 @@ function ensureColumn(table, column, definition) {
 }
 
 ensureColumn('guild_config', 'ticket_log_channel_id', 'TEXT');
+ensureColumn('guild_config', 'welcome_config', 'TEXT');
 ensureColumn('tickets', 'claimed_at', 'TEXT');
 ensureColumn('tickets', 'closed_by', 'TEXT');
 ensureColumn('giveaways', 'cancelled', 'INTEGER DEFAULT 0');
@@ -126,7 +134,7 @@ const upsertConfigField = (field) =>
 
 // campos permitidos — nunca interpolar entrada do usuário aqui
 const CONFIG_FIELDS = [
-  'welcome_channel_id', 'welcome_message', 'log_channel_id',
+  'welcome_channel_id', 'welcome_message', 'welcome_config', 'log_channel_id',
   'ticket_category_id', 'ticket_panel_channel_id', 'ticket_log_channel_id',
   'verify_channel_id', 'verify_role_id', 'autorole_id', 'mute_role_id',
 ];
@@ -143,4 +151,20 @@ function getGuildConfig(guildId) {
   return getGuildConfigStmt.get(guildId) ?? null;
 }
 
-module.exports = { db, setGuildConfig, getGuildConfig };
+// ---- bot_settings (chave/valor global) ----
+const setBotSettingStmt = db.prepare(
+  `INSERT INTO bot_settings (key, value) VALUES (?, ?)
+   ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+);
+const getBotSettingStmt = db.prepare('SELECT value FROM bot_settings WHERE key = ?');
+
+function setBotSetting(key, value) {
+  setBotSettingStmt.run(key, value);
+}
+
+/** @returns {string|null} */
+function getBotSetting(key) {
+  return getBotSettingStmt.get(key)?.value ?? null;
+}
+
+module.exports = { db, setGuildConfig, getGuildConfig, setBotSetting, getBotSetting };
