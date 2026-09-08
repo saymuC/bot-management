@@ -125,6 +125,13 @@ module.exports = {
         return;
       }
     } catch (err) {
+      // 10062 (Unknown interaction) / 40060 (already acknowledged): o token da
+      // interação morreu ou outra instância do bot já respondeu ao mesmo clique.
+      // Não há canal de resposta válido — só registra e sai.
+      if (err.code === 10062 || err.code === 40060) {
+        console.warn(`[interactionCreate] Interação não respondível (${err.code}); ignorada.`);
+        return;
+      }
       console.error('[interactionCreate] Erro:', err);
       // Autocomplete não tem canal de resposta de erro — só o log acima.
       if (interaction.isAutocomplete?.()) return;

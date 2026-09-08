@@ -2,14 +2,16 @@
  * Fluxo de pré-visualização do /embed.
  *
  * O comando não envia a mensagem direto: ele mostra ao autor um preview
- * efêmero com três botões (Enviar / Editar / Excluir). O estado fica em
- * utils/embedDrafts.js e é referenciado pelo id dentro do customId.
+ * efêmero com os botões Enviar / Editar / Excluir, um select para trocar o
+ * canal de destino e (quando há mídia) um botão para removê-la.
+ * O estado fica em utils/embedDrafts.js, referenciado pelo id no customId.
  */
 
 const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelSelectMenuBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -20,17 +22,71 @@ const {
 const { baseEmbed, successEmbed, errorEmbed, parseHexColor } = require('../utils/embeds');
 const { getDraft, updateDraft, deleteDraft } = require('../utils/embedDrafts');
 const { classifyUrl } = require('../utils/media');
+const { POST_EMBED_PERMS_LABEL, TEXT_CHANNEL_TYPES, canPostEmbed, resolveTextChannel } = require('../utils/channelPerms');
 
 const PREFIX = 'embedp_';
 
-/** Linha de botões do preview. */
-function previewComponents(id) {
+const EMPTY_MEDIA = Object.freeze({
+  imageUrl: null,
+  imageAttachment: null,
+  fileAttachment: null,
+  linkContent: null,
+});
+
+/** @returns {boolean} true se o rascunho tem alguma mídia associada. */
+const hasMedia = (draft) => Boolean(draft.imageUrl || draft.imageAttachment || draft.fileAttachment || draft.linkContent);
+
+/**
+ * Acka a interação tolerando o erro 10062 ("Unknown interaction").
+ *
+ * Acontece quando o token da interação já expirou (3s) ou quando outra
+ * instância do bot ackou o mesmo clique antes. Nos dois casos abortamos o
+ * fluxo em vez de estourar: seguir adiante enviaria o embed duplicado.
+ *
+ * @returns {Promise<boolean>} false quando o ack falhou e o fluxo deve parar.
+ */
+async function safeAck(interaction, ack) {
+  try {
+    await ack();
+    return true;
+  } catch (err) {
+    if (err.code === 10062 || err.code === 40060) {
+      console.warn(`[embed] Interação ${interaction.customId} não pôde ser ackada (${err.code}); ação ignorada.`);
+      return false;
+    }
+    throw err;
+  }
+}
+
+/** Componentes do preview: select de canal + linha de ações. */
+function previewComponents(draft) {
+  const actions = [
+    new ButtonBuilder().setCustomId(`${PREFIX}send_${draft.id}`).setLabel('Enviar').setEmoji('✅').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`${PREFIX}edit_${draft.id}`).setLabel('Editar').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`${PREFIX}delete_${draft.id}`).setLabel('Excluir').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
+  ];
+
+  if (hasMedia(draft)) {
+    actions.splice(
+      2,
+      0,
+      new ButtonBuilder()
+        .setCustomId(`${PREFIX}clearmedia_${draft.id}`)
+        .setLabel('Remover mídia')
+        .setEmoji('🚫')
+        .setStyle(ButtonStyle.Secondary)
+    );
+  }
+
   return [
     new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`${PREFIX}send_${id}`).setLabel('Enviar').setEmoji('✅').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`${PREFIX}edit_${id}`).setLabel('Editar').setEmoji('✏️').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`${PREFIX}delete_${id}`).setLabel('Excluir').setEmoji('🗑️').setStyle(ButtonStyle.Danger)
+      new ChannelSelectMenuBuilder()
+        .setCustomId(`${PREFIX}channel_${draft.id}`)
+        .setPlaceholder('Alterar canal de destino')
+        .addChannelTypes(...TEXT_CHANNEL_TYPES)
+        .setDefaultChannels(draft.channelId)
     ),
+    new ActionRowBuilder().addComponents(actions),
   ];
 }
 
@@ -40,6 +96,7 @@ function draftEmbed(draft, image) {
     title: draft.title,
     description: draft.description,
     color: parseHexColor(draft.colorHex) ?? undefined,
+    footer: draft.footer || undefined,
     image,
   });
 }
@@ -50,19 +107,20 @@ function draftEmbed(draft, image) {
  * Vídeos/arquivos não são reenviados a cada edição do preview — apenas
  * descritos no texto, para não gastar upload em algo que ainda pode mudar.
  */
-function buildPreviewPayload(draft) {
+function buildPreviewPayload(draft, extraNotice = '') {
   const lines = [`🔎 **Pré-visualização** — só você vê isto. Destino: <#${draft.channelId}>`];
   if (draft.fileAttachment) {
     lines.push(`📎 Anexo \`${draft.fileAttachment.name}\` será enviado junto com a mensagem.`);
   }
   if (draft.linkContent) {
-    lines.push(`🔗 O link ${draft.linkContent} será enviado no corpo da mensagem (o Discord gera o player/preview).`);
+    lines.push(`🔗 ${draft.linkContent} irá no corpo da mensagem (o Discord gera o player/preview desse tipo de link).`);
   }
+  if (extraNotice) lines.push(extraNotice);
 
   return {
     content: lines.join('\n'),
     embeds: [draftEmbed(draft, draft.imageUrl ?? undefined)],
-    components: previewComponents(draft.id),
+    components: previewComponents(draft),
     files: [],
   };
 }
@@ -92,18 +150,21 @@ function buildFinalPayload(draft) {
   };
 }
 
-/** Encerra o preview substituindo-o por uma mensagem final sem botões. */
+/** Encerra o preview substituindo-o por uma mensagem final sem componentes. */
 function closePreview(interaction, embed) {
   return interaction.editReply({ content: '', embeds: [embed], components: [], files: [] });
 }
 
 async function handleSend(interaction, draft) {
-  await interaction.deferUpdate();
+  if (!(await safeAck(interaction, () => interaction.deferUpdate()))) return undefined;
 
   const channel = await interaction.guild.channels.fetch(draft.channelId).catch(() => null);
   if (!channel) {
     deleteDraft(draft.id);
     return closePreview(interaction, errorEmbed('O canal de destino não existe mais.'));
+  }
+  if (!canPostEmbed(channel, interaction.guild)) {
+    return closePreview(interaction, errorEmbed(`Não tenho permissão em ${channel}. Preciso de: ${POST_EMBED_PERMS_LABEL}.`));
   }
 
   try {
@@ -112,78 +173,105 @@ async function handleSend(interaction, draft) {
     return closePreview(interaction, successEmbed(`Embed enviado em ${channel}. [Ver mensagem](${sent.url})`));
   } catch (err) {
     console.error('[embed] Falha ao enviar embed:', err.message);
-    return closePreview(
-      interaction,
-      errorEmbed(`Não consegui enviar em ${channel}. Verifique as permissões do bot (Ver Canal, Enviar Mensagens, Anexar Arquivos).`)
-    );
+    return closePreview(interaction, errorEmbed(`Não consegui enviar em ${channel}. Verifique as permissões do bot.`));
   }
 }
 
-async function handleDelete(interaction, draft) {
+function handleDelete(interaction, draft) {
   deleteDraft(draft.id);
-  return interaction.update({
-    content: '',
-    embeds: [successEmbed('Rascunho descartado. Nada foi enviado.')],
-    components: [],
-    files: [],
-  });
+  return safeAck(interaction, () =>
+    interaction.update({
+      content: '',
+      embeds: [successEmbed('Rascunho descartado. Nada foi enviado.')],
+      components: [],
+      files: [],
+    })
+  );
+}
+
+/** Zera toda a mídia do rascunho (anexo, imagem e link). */
+function handleClearMedia(interaction, draft) {
+  const updated = updateDraft(draft.id, EMPTY_MEDIA);
+  if (!updated) return replyExpired(interaction);
+  return safeAck(interaction, () => interaction.update(buildPreviewPayload(updated, '🚫 Mídia removida.')));
+}
+
+/** Troca o canal de destino via select menu, validando as permissões do bot. */
+async function handleChannelSelect(interaction, draft) {
+  const channel = interaction.channels.first();
+  if (!channel) return undefined;
+
+  if (!canPostEmbed(channel, interaction.guild)) {
+    return safeAck(interaction, () =>
+      interaction.update(
+        buildPreviewPayload(draft, `⚠️ Não tenho permissão em ${channel} (preciso de: ${POST_EMBED_PERMS_LABEL}). Destino mantido.`)
+      )
+    );
+  }
+
+  const updated = updateDraft(draft.id, { channelId: channel.id });
+  if (!updated) return replyExpired(interaction);
+  return safeAck(interaction, () => interaction.update(buildPreviewPayload(updated, `📍 Destino alterado para ${channel}.`)));
 }
 
 /** Abre o modal de edição já preenchido com os valores atuais. */
 function handleEdit(interaction, draft) {
-  const mediaValue = draft.imageAttachment ? '' : draft.imageUrl ?? draft.linkContent ?? '';
+  const mediaValue = draft.imageAttachment || draft.fileAttachment ? '' : draft.imageUrl ?? draft.linkContent ?? '';
+  const anexoAviso = draft.imageAttachment || draft.fileAttachment ? 'Preencher aqui substitui o anexo enviado' : 'https://...';
 
-  const modal = new ModalBuilder().setCustomId(`${PREFIX}modal_${draft.id}`).setTitle('Editar embed');
+  const inputs = [
+    new TextInputBuilder()
+      .setCustomId('titulo')
+      .setLabel('Título')
+      .setStyle(TextInputStyle.Short)
+      .setMaxLength(256)
+      .setRequired(true)
+      .setValue(draft.title),
+    new TextInputBuilder()
+      .setCustomId('descricao')
+      .setLabel('Descrição (use \\n para quebra de linha)')
+      .setStyle(TextInputStyle.Paragraph)
+      .setMaxLength(4000)
+      .setRequired(true)
+      .setValue(draft.description),
+    new TextInputBuilder()
+      .setCustomId('cor')
+      .setLabel('Cor hex (ex: #5865F2)')
+      .setStyle(TextInputStyle.Short)
+      .setMaxLength(7)
+      .setRequired(false)
+      .setValue(draft.colorHex ?? ''),
+    new TextInputBuilder()
+      .setCustomId('midia_url')
+      .setLabel('Link de imagem/GIF/vídeo')
+      .setPlaceholder(anexoAviso)
+      .setStyle(TextInputStyle.Short)
+      .setMaxLength(500)
+      .setRequired(false)
+      .setValue(mediaValue),
+    new TextInputBuilder()
+      .setCustomId('rodape')
+      .setLabel('Rodapé (opcional)')
+      .setPlaceholder('Texto pequeno no pé do embed')
+      .setStyle(TextInputStyle.Short)
+      .setMaxLength(2048)
+      .setRequired(false)
+      .setValue(draft.footer ?? ''),
+  ];
 
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('titulo')
-        .setLabel('Título')
-        .setStyle(TextInputStyle.Short)
-        .setMaxLength(256)
-        .setRequired(true)
-        .setValue(draft.title)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('descricao')
-        .setLabel('Descrição')
-        .setStyle(TextInputStyle.Paragraph)
-        .setMaxLength(4000)
-        .setRequired(true)
-        .setValue(draft.description)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('cor')
-        .setLabel('Cor hex (ex: #5865F2)')
-        .setStyle(TextInputStyle.Short)
-        .setMaxLength(7)
-        .setRequired(false)
-        .setValue(draft.colorHex ?? '')
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder()
-        .setCustomId('midia_url')
-        .setLabel('Link de imagem/GIF/vídeo (opcional)')
-        .setPlaceholder(draft.imageAttachment ? 'Preencher aqui substitui o anexo enviado' : 'https://...')
-        .setStyle(TextInputStyle.Short)
-        .setMaxLength(500)
-        .setRequired(false)
-        .setValue(mediaValue)
-    )
-  );
+  const modal = new ModalBuilder()
+    .setCustomId(`${PREFIX}modal_${draft.id}`)
+    .setTitle('Editar embed')
+    .addComponents(inputs.map((input) => new ActionRowBuilder().addComponents(input)));
 
-  return interaction.showModal(modal);
+  return interaction.showModal(modal).catch((err) => {
+    if (err.code === 10062) {
+      console.warn('[embed] Modal de edição não abriu: interação expirada.');
+      return undefined;
+    }
+    throw err;
+  });
 }
-
-const EMPTY_MEDIA = Object.freeze({
-  imageUrl: null,
-  imageAttachment: null,
-  fileAttachment: null,
-  linkContent: null,
-});
 
 /**
  * Resolve a mídia após a edição no modal.
@@ -224,6 +312,7 @@ async function handleModalSubmit(interaction, draft) {
   const description = interaction.fields.getTextInputValue('descricao').replaceAll('\\n', '\n');
   const colorRaw = interaction.fields.getTextInputValue('cor').trim();
   const mediaRaw = interaction.fields.getTextInputValue('midia_url').trim();
+  const footer = interaction.fields.getTextInputValue('rodape').trim();
 
   const warnings = [];
 
@@ -238,18 +327,10 @@ async function handleModalSubmit(interaction, draft) {
   }
 
   const media = resolveEditedMedia(draft, mediaRaw, warnings);
+  const updated = updateDraft(draft.id, { title, description, colorHex, footer: footer || null, ...media });
+  if (!updated) return replyExpired(interaction);
 
-  const updated = updateDraft(draft.id, { title, description, colorHex, ...media });
-  if (!updated) {
-    return interaction.update({
-      content: '',
-      embeds: [errorEmbed('Este rascunho expirou. Rode `/embed` novamente.')],
-      components: [],
-      files: [],
-    });
-  }
-
-  await interaction.update(buildPreviewPayload(updated));
+  if (!(await safeAck(interaction, () => interaction.update(buildPreviewPayload(updated))))) return undefined;
 
   if (warnings.length) {
     await interaction
@@ -259,6 +340,20 @@ async function handleModalSubmit(interaction, draft) {
   return undefined;
 }
 
+const EXPIRED_PAYLOAD = {
+  content: '',
+  embeds: [errorEmbed('Este rascunho expirou ou o bot foi reiniciado. Rode `/embed` novamente.')],
+  components: [],
+  files: [],
+};
+
+function replyExpired(interaction) {
+  if (interaction.isModalSubmit() && !interaction.isFromMessage()) {
+    return safeAck(interaction, () => interaction.reply({ ...EXPIRED_PAYLOAD, flags: MessageFlags.Ephemeral }));
+  }
+  return safeAck(interaction, () => interaction.update(EXPIRED_PAYLOAD));
+}
+
 /**
  * Roteia as interações do preview (`embedp_*`).
  * Gerencia o próprio ack: `showModal` não admite defer antes.
@@ -266,23 +361,19 @@ async function handleModalSubmit(interaction, draft) {
 async function routeEmbedInteraction(interaction) {
   const rest = interaction.customId.slice(PREFIX.length);
   const separator = rest.indexOf('_');
-  if (separator === -1) return;
+  if (separator === -1) return undefined;
 
   const action = rest.slice(0, separator);
-  const draftId = rest.slice(separator + 1);
-  const draft = getDraft(draftId);
+  const draft = getDraft(rest.slice(separator + 1));
 
-  const expired = { embeds: [errorEmbed('Este rascunho expirou. Rode `/embed` novamente.')], content: '', components: [], files: [] };
-
-  if (!draft) {
-    if (interaction.isModalSubmit()) return interaction.reply({ ...expired, flags: MessageFlags.Ephemeral });
-    return interaction.update(expired);
-  }
+  if (!draft) return replyExpired(interaction);
   if (draft.userId !== interaction.user.id) {
-    return interaction.reply({
-      embeds: [errorEmbed('Apenas quem criou este rascunho pode usá-lo.')],
-      flags: MessageFlags.Ephemeral,
-    });
+    return safeAck(interaction, () =>
+      interaction.reply({
+        embeds: [errorEmbed('Apenas quem criou este rascunho pode usá-lo.')],
+        flags: MessageFlags.Ephemeral,
+      })
+    );
   }
 
   switch (action) {
@@ -292,6 +383,10 @@ async function routeEmbedInteraction(interaction) {
       return handleEdit(interaction, draft);
     case 'delete':
       return handleDelete(interaction, draft);
+    case 'clearmedia':
+      return handleClearMedia(interaction, draft);
+    case 'channel':
+      return handleChannelSelect(interaction, draft);
     case 'modal':
       return handleModalSubmit(interaction, draft);
     default:
@@ -299,4 +394,4 @@ async function routeEmbedInteraction(interaction) {
   }
 }
 
-module.exports = { PREFIX, buildPreviewPayload, buildFinalPayload, routeEmbedInteraction };
+module.exports = { PREFIX, EMPTY_MEDIA, buildPreviewPayload, buildFinalPayload, routeEmbedInteraction };

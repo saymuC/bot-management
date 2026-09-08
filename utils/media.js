@@ -9,6 +9,33 @@
 const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'];
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'mov', 'mkv'];
 
+/**
+ * Hosts cujos links o próprio Discord desdobra em player/preview.
+ * Esses precisam ir no corpo da mensagem — dentro do embed não renderizam.
+ */
+const UNFURL_HOSTS = [
+  'youtube.com',
+  'youtu.be',
+  'tenor.com',
+  'giphy.com',
+  'streamable.com',
+  'twitch.tv',
+  'vimeo.com',
+  'tiktok.com',
+  'twitter.com',
+  'x.com',
+  'instagram.com',
+  'reddit.com',
+  'facebook.com',
+  'soundcloud.com',
+  'spotify.com',
+];
+
+function isUnfurlHost(hostname) {
+  const host = hostname.replace(/^www\./, '').toLowerCase();
+  return UNFURL_HOSTS.some((known) => host === known || host.endsWith(`.${known}`));
+}
+
 /** Remove caracteres problemáticos e garante um nome de arquivo utilizável. */
 function sanitizeFileName(name, fallback = 'anexo') {
   const clean = String(name ?? '')
@@ -55,7 +82,13 @@ function classifyAttachment(attachment) {
 
 /**
  * Classifica um link de mídia.
- * @returns {{ kind: 'image'|'video'|'link', url: string }|null} null se não for URL válida.
+ *
+ * `image` vai para dentro do embed (campo image); `content` vai no corpo da
+ * mensagem, porque vídeos e links de plataformas não renderizam dentro do embed.
+ * Links sem extensão reconhecida e fora dos hosts de unfurl são tratados como
+ * imagem direta (CDNs costumam servir imagem sem extensão na URL).
+ *
+ * @returns {{ kind: 'image'|'content', url: string }|null} null se não for URL válida.
  */
 function classifyUrl(raw) {
   const url = String(raw ?? '').trim();
@@ -63,13 +96,15 @@ function classifyUrl(raw) {
 
   const ext = extensionOf(url);
   if (IMAGE_EXTENSIONS.includes(ext)) return { kind: 'image', url };
-  if (VIDEO_EXTENSIONS.includes(ext)) return { kind: 'video', url };
-  return { kind: 'link', url };
+  if (VIDEO_EXTENSIONS.includes(ext)) return { kind: 'content', url };
+  if (isUnfurlHost(new URL(url).hostname)) return { kind: 'content', url };
+  return { kind: 'image', url };
 }
 
 module.exports = {
   IMAGE_EXTENSIONS,
   VIDEO_EXTENSIONS,
+  UNFURL_HOSTS,
   sanitizeFileName,
   extensionOf,
   isHttpUrl,

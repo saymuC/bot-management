@@ -2,22 +2,9 @@ const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('disco
 const { respond } = require('../../utils/interactions');
 const { errorEmbed, parseHexColor } = require('../../utils/embeds');
 const { createDraft, getDraft } = require('../../utils/embedDrafts');
-const { buildPreviewPayload } = require('../../handlers/embedHandler');
+const { buildPreviewPayload, EMPTY_MEDIA } = require('../../handlers/embedHandler');
 const { classifyAttachment, classifyUrl } = require('../../utils/media');
-
-const REQUIRED_PERMS = [
-  PermissionFlagsBits.ViewChannel,
-  PermissionFlagsBits.SendMessages,
-  PermissionFlagsBits.EmbedLinks,
-  PermissionFlagsBits.AttachFiles,
-];
-
-const EMPTY_MEDIA = Object.freeze({
-  imageUrl: null,
-  imageAttachment: null,
-  fileAttachment: null,
-  linkContent: null,
-});
+const { POST_EMBED_PERMS_LABEL, canPostEmbed } = require('../../utils/channelPerms');
 
 /**
  * Traduz um anexo do Discord nos campos de mídia do rascunho.
@@ -41,7 +28,10 @@ module.exports = {
     .addStringOption((opt) => opt.setName('titulo').setDescription('Título do embed').setRequired(true).setMaxLength(256))
     .addStringOption((opt) => opt.setName('descricao').setDescription('Descrição (use \\n para quebra de linha)').setRequired(true).setMaxLength(4000))
     .addChannelOption((opt) =>
-      opt.setName('canal').setDescription('Canal de destino (padrão: atual)').addChannelTypes(ChannelType.GuildText)
+      opt
+        .setName('canal')
+        .setDescription('Canal de destino (padrão: atual)')
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
     )
     .addStringOption((opt) => opt.setName('cor').setDescription('Cor hex (ex: #5865F2)'))
     .addAttachmentOption((opt) =>
@@ -49,7 +39,8 @@ module.exports = {
     )
     .addStringOption((opt) =>
       opt.setName('midia_url').setDescription('Link de imagem, GIF ou vídeo (alternativa ao anexo)')
-    ),
+    )
+    .addStringOption((opt) => opt.setName('rodape').setDescription('Texto pequeno no pé do embed').setMaxLength(2048)),
 
   async execute(interaction) {
     const title = interaction.options.getString('titulo', true);
@@ -58,20 +49,15 @@ module.exports = {
     const colorRaw = interaction.options.getString('cor');
     const attachment = interaction.options.getAttachment('anexo');
     const mediaUrlRaw = interaction.options.getString('midia_url');
+    const footer = interaction.options.getString('rodape');
 
     if (colorRaw && parseHexColor(colorRaw) === null) {
       return respond(interaction, { embeds: [errorEmbed('Cor inválida. Use o formato hex, ex: `#5865F2`.')] });
     }
 
-    const botPerms = channel.permissionsFor(interaction.guild.members.me);
-    if (!botPerms?.has(REQUIRED_PERMS)) {
+    if (!canPostEmbed(channel, interaction.guild)) {
       return respond(interaction, {
-        embeds: [
-          errorEmbed(
-            `Não tenho permissão suficiente em ${channel}. ` +
-              'Preciso de: Ver Canal, Enviar Mensagens, Inserir Links e Anexar Arquivos.'
-          ),
-        ],
+        embeds: [errorEmbed(`Não tenho permissão suficiente em ${channel}. Preciso de: ${POST_EMBED_PERMS_LABEL}.`)],
       });
     }
 
@@ -101,13 +87,11 @@ module.exports = {
       title,
       description,
       colorHex: colorRaw ?? null,
+      footer: footer ?? null,
       ...media,
     });
 
-    const notice =
-      attachment && mediaUrlRaw ? '\nℹ️ Você enviou anexo e link: o anexo foi usado e o link ignorado.' : '';
-
-    const preview = buildPreviewPayload(getDraft(draftId));
-    return respond(interaction, { ...preview, content: preview.content + notice });
+    const notice = attachment && mediaUrlRaw ? 'ℹ️ Você enviou anexo e link: o anexo foi usado e o link ignorado.' : '';
+    return respond(interaction, buildPreviewPayload(getDraft(draftId), notice));
   },
 };
