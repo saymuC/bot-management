@@ -88,7 +88,13 @@ module.exports = {
         // antes de responder (enviar mensagem, banir, criar canal) estouram esse prazo
         // e geram DiscordAPIError[10062]. O defer reserva a resposta imediatamente;
         // os comandos então usam respond() -> editReply.
-        await interaction.deferReply(command.ephemeral === false ? {} : { flags: MessageFlags.Ephemeral });
+        //
+        // `defer: false` é a exceção para comandos que respondem de imediato: o
+        // defer custa uma ida-e-volta REST inteira antes da resposta aparecer,
+        // então quem não faz I/O antes de responder economiza esse tempo todo.
+        if (command.defer !== false) {
+          await interaction.deferReply(command.ephemeral === false ? {} : { flags: MessageFlags.Ephemeral });
+        }
         await command.execute(interaction);
         return;
       }
