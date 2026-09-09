@@ -19,8 +19,14 @@ const signatureOf = (message) => toPlain(message.content);
 /** Anexos + figurinhas contam juntos para o spam de anexos. */
 const attachmentCount = (message) => message.attachments.size + (message.stickers?.size ?? 0);
 
-/** Nomes dos arquivos anexados, para o filtro de extensão. */
-const attachmentNames = (message) => [...message.attachments.values()].map((a) => a.name ?? '');
+/**
+ * Anexos como `{ name, contentType }`.
+ *
+ * O `contentType` vem do Discord e é o que distingue gif de imagem sem depender
+ * do nome do arquivo — que o autor escolhe e pode não ter extensão nenhuma.
+ */
+const attachmentFiles = (message) =>
+  [...message.attachments.values()].map((a) => ({ name: a.name ?? '', contentType: a.contentType ?? '' }));
 
 /**
  * Mensagens que o AutoMod nunca examina.
@@ -77,6 +83,7 @@ async function inspectMessage(message, { track = true } = {}) {
     });
   }
 
+  const files = attachmentFiles(message);
   const ctx = {
     content: message.content ?? '',
     signature,
@@ -84,8 +91,10 @@ async function inspectMessage(message, { track = true } = {}) {
     member: message.member,
     guild: message.guild,
     channelId: message.channel.id,
-    attachmentNames: attachmentNames(message),
+    attachmentFiles: files,
+    attachmentNames: files.map((file) => file.name),
     attachments: attachmentCount(message),
+    stickers: message.stickers?.size ?? 0,
     now,
   };
 
@@ -122,8 +131,12 @@ async function dryRun({ guild, member, channelId, content }) {
       member,
       guild,
       channelId,
+      // O comando recebe texto, não arquivos: as regras de mídia só podem
+      // apontar o que estiver **escrito** (link de imagem, gif de tenor).
+      attachmentFiles: [],
       attachmentNames: [],
       attachments: 0,
+      stickers: 0,
       now: Date.now(),
     },
     config

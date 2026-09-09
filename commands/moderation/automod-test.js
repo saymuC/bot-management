@@ -100,7 +100,8 @@ module.exports = {
             `\`\`\`${content.slice(0, 900)}\`\`\``,
             violation
               ? 'O motor para na primeira regra violada, então pode haver outras além desta.'
-              : 'Regras de flood e repetição dependem do histórico real e não são simuladas aqui.',
+              : 'Flood e repetição dependem do histórico real; anexo, figurinha e arquivo não ' +
+                'existem num teste de texto. Nada disso é simulado aqui.',
           ].join('\n'),
           color: violation ? colors.error : colors.success,
           fields,

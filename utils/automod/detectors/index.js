@@ -10,12 +10,13 @@
 const { MESSAGE_RULE_KEYS, RULES } = require('../../../config/automodRules');
 const { exemptionReason } = require('../config');
 const { detectors: excess } = require('./excess');
+const { detectors: media } = require('./media');
 const { detectors: links } = require('./links');
 const { detectors: words } = require('./words');
 const { detectors: flood } = require('./flood');
 
 /** `ruleKey` -> função de checagem. Pode ser sync ou async. */
-const CHECKS = Object.freeze({ ...excess, ...links, ...words, ...flood });
+const CHECKS = Object.freeze({ ...excess, ...media, ...links, ...words, ...flood });
 
 /** Toda regra do catálogo tem detector? Erra alto no boot, não silenciosamente em produção. */
 const missing = MESSAGE_RULE_KEYS.filter((key) => typeof CHECKS[key] !== 'function');
@@ -25,7 +26,8 @@ if (missing.length) throw new Error(`[automod] regras sem detector: ${missing.jo
  * Avalia a mensagem contra as regras ligadas.
  *
  * @param {object} ctx contexto montado pelo motor: { content, signature, message,
- *   member, guild, channelId, attachmentNames, attachments, now }
+ *   member, guild, channelId, attachmentFiles, attachmentNames, attachments,
+ *   stickers, now }
  * @param {object} config config normalizada do AutoMod do servidor
  * @returns {Promise<{ key: string, rule: object, label: string, detail: string }|null>}
  */

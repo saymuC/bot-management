@@ -97,13 +97,13 @@ O motor roda **no próprio bot**, não no AutoMod nativo do Discord. Em troca de
 
 `/automod` abre o painel (sem parâmetros). Tudo é salvo na hora, sem botão "salvar". São três telas:
 
-- **Início** — menu com as 19 regras (✅/▫️ indicando ligada), select do canal de logs do AutoMod e os botões `[Ligar/Desligar o AutoMod] [Isenções globais] [Escada] [Isentar mods: sim/não] [Fechar]`. O resumo destaca as regras **ligadas mas sem efeito** (sem apagar, sem ação e sem pontos) — é o erro de configuração mais fácil de cometer.
+- **Início** — menu com as 20 regras (✅/▫️ indicando ligada), select do canal de logs do AutoMod e os botões `[Ligar/Desligar o AutoMod] [Isenções globais] [Escada] [Isentar mods: sim/não] [Fechar]`. O resumo destaca as regras **ligadas mas sem efeito** (sem apagar, sem ação e sem pontos) — é o erro de configuração mais fácil de cometer.
 - **Regra** — quatro selects (ação imediata, pontos de 0–10, quem vê o aviso, quanto tempo o aviso fica) e os botões `[Ligar/Desligar] [Apagar: sim/não] [Limites…] [Isenções] [Voltar]`. "Limites…" abre um modal com os campos daquela regra; listas (palavras, domínios, extensões) vêm uma por linha.
 - **Isenções** — `RoleSelect` + `ChannelSelect` (múltiplos), tanto no escopo global quanto por regra.
 
 O AutoMod só age depois de `[Ligar o AutoMod]`: ligar uma regra sozinha não basta, o que permite configurar tudo com calma antes de valer.
 
-### As 19 regras
+### As 20 regras
 
 | Regra | Família | O que barra | Limites |
 |---|---|---|---|
@@ -114,7 +114,8 @@ O AutoMod só age depois de `[Ligar o AutoMod]`: ligar uma regra sozinha não ba
 | Excesso de linhas | Excessos | O "muro de texto" | máximo de linhas |
 | Excesso de spoilers | Excessos | Muitos blocos `\|\|spoiler\|\|` | máximo de spoilers |
 | Zalgo | Excessos | Pilhas de acentos combinantes que esticam a linha | densidade máxima (%) |
-| Tipos de arquivo | Excessos | Anexos por extensão | extensões bloqueadas |
+| Mídia e anexos | Mídia | Imagem, gif, vídeo, arquivo, figurinha e link direto de mídia | barrar imagens, gifs, vídeos, outros arquivos, figurinhas |
+| Tipos de arquivo | Mídia | Anexos por extensão | extensões bloqueadas |
 | Convites do Discord | Links | `discord.gg` e afins | permitir convite deste servidor |
 | Domínios bloqueados | Links | Lista sempre barrada, mesmo se estiver na de permitidos | domínios bloqueados |
 | Links em geral | Links | Qualquer URL (lista de permitidos vazia = barra todos) | domínios permitidos |
@@ -130,6 +131,18 @@ O AutoMod só age depois de `[Ligar o AutoMod]`: ligar uma regra sozinha não ba
 O motor avalia da regra mais barata para a mais cara e **para na primeira violação** — punir a mesma mensagem por três regras triplicaria os pontos sem o admin ter pedido isso. As duas regras de raid rodam na entrada do membro, antes do autorole e das boas-vindas, e podem suprimir os dois. O alerta de entrada em massa **não altera permissão de canal nenhuma**: ele só faz quem entrar durante o alerta receber a ação configurada.
 
 A edição de mensagem também passa pelo filtro (senão a burla seria mandar "oi" e editar para o link), mas não conta no histórico de flood — corrigir um typo três vezes não é mandar três mensagens.
+
+### Canal só de texto: mídia e links
+
+Duas regras cobrem isso, e em ambas **quais canais podem** é a lista de isenções da própria regra — ligue a regra para o servidor e isente `#memes`.
+
+**Mídia e anexos** barra as cinco categorias, cada uma com seu interruptor: imagens (`png`, `jpg`, `webp`), gifs (`gif` e link de `tenor.com`/`giphy.com`), vídeos (`mp4`, `mov`, `webm`), outros arquivos (áudio, pdf, zip, exe — tudo o que não é imagem, gif nem vídeo) e figurinhas. Ligar a regra barra tudo; desmarque no `[Limites…]` o que quiser permitir. A categoria é decidida pelo `content-type` que o Discord manda, com a extensão do nome como reserva — anexo sem tipo identificável cai em "outros arquivos", porque quem barrou o resto quis dizer "só texto".
+
+A regra pega os **dois** caminhos pelos quais mídia entra num canal: o anexo e o **link direto** (`i.imgur.com/x.png`, `tenor.com/view/…`). Barrar só o anexo seria um filtro que se contorna colando a URL. O que ela não faz é abrir a página de um link sem extensão para descobrir se há imagem lá dentro: `imgur.com/a/album` passa por esta regra — é a regra de links que decide sobre ele.
+
+**Links em geral** barra qualquer URL: deixe a lista de permitidos vazia e nada passa; preencha e só o que está nela passa (subdomínios incluídos). O link é reconhecido sem `http://` e por baixo de disfarces (`site [.] com`, `hxxp://`), mas sem esquema é preciso um TLD conhecido — a lista cobre o que aparece em divulgação e golpe, e é o que impede "abre o index.js" de virar infração. **Com** `https://` na frente, qualquer TLD conta, inclusive os exóticos: quem escreveu o esquema declarou que é link.
+
+O relatório do `/automod-test` só recebe texto, então ele mostra o que estiver **escrito** (link de imagem, gif de tenor) e não tem como simular anexo, arquivo ou figurinha.
 
 ### Ação imediata, pontos e escada
 
@@ -327,7 +340,7 @@ Se você preencher `CLIENT_SECRET`, `OAUTH_REDIRECT_URI` e `OAUTH_PORT` no `.env
 - `events/` — ready, interactionCreate (roteia botões/selects por prefixo do customId), message create/update, member add/remove, logs
 - `commands/<módulo>/` — um arquivo por comando
 - `config/automodRules.js` — catálogo declarativo das 19 regras (o painel e os detectores leem daqui)
-- `utils/automod/` — `config.js` (JSON normalizado + isenções) · `textNormalize.js` (desdisfarce) · `wildcard.js` (curinga `*` sem regex do usuário) · `tracker.js` (janelas em memória) · `infractions.js` (pontos e escada) · `enforce.js` (ações e log) · `raid.js` · `detectors/`
+- `utils/automod/` — `config.js` (JSON normalizado + isenções) · `textNormalize.js` (desdisfarce) · `wildcard.js` (curinga `*` sem regex do usuário) · `tracker.js` (janelas em memória) · `infractions.js` (pontos e escada) · `enforce.js` (ações e log) · `raid.js` · `detectors/` (`excess` · `media` · `links` · `words` · `flood`)
 - `test/automod.test.js` — testes da lógica pura (`npm test`)
 - `utils/emojis.js` — registro central dos emojis · `utils/emojiSource.js` — download validado do `/emoji-add`
 - `utils/presence.js` — presença salva e normalizada · `utils/presenceKeeper.js` — garante o status após reconexões

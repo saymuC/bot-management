@@ -209,6 +209,9 @@ const homeFor = (interaction, config, notice = '') =>
 
 // ----------------------------------------------------------------- tela: regra
 
+/** Categorias da regra de mídia, na ordem do catálogo. */
+const MEDIA_KINDS = Object.freeze(Object.keys(RULES.media.fields));
+
 /** Prazo do aviso em texto legível. `0` é "fica", não "zero segundos". */
 const describeNoticeTtl = (ms) => (ms > 0 ? `⏱️ apaga em ${formatDuration(ms)}` : '📌 até alguém apagar');
 
@@ -285,6 +288,17 @@ function ruleEmbed(key, config, guild) {
     .filter(Boolean);
 
   if (listPreview.length) fields.push({ name: 'Conteúdo das listas', value: listPreview.join('\n').slice(0, 1024) });
+
+  // Caso próprio da regra de mídia: ela não tem número nem lista, só as cinco
+  // categorias. Desligadas todas, a regra fica verde no painel e não checa nada —
+  // e o `isInert` genérico não vê isso, porque a ação e os pontos continuam lá.
+  if (key === 'media' && rule.enabled && MEDIA_KINDS.every((kind) => !rule.limits[kind])) {
+    fields.push({
+      name: '⚠️ Nenhuma categoria marcada',
+      value: 'Está ligada, mas não barra imagem, gif, vídeo, arquivo nem figurinha. Marque ao menos uma em "Limites…".',
+      inline: false,
+    });
+  }
 
   if (isInert(rule)) {
     fields.push({

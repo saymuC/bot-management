@@ -45,6 +45,13 @@ function linkifiable(content) {
 
 /**
  * Domínios citados no texto.
+ *
+ * O TLD conhecido só é exigido de quem escreveu o host **sem** esquema: aí a
+ * lista é o que separa `site.com` de `index.js`. Com `https://` na frente não há
+ * ambiguidade nenhuma — quem escreve isso está mandando um link, qualquer que
+ * seja o TLD — e exigir a lista deixava passar o domínio exótico, que é
+ * justamente o que aparece em golpe.
+ *
  * @returns {string[]} hosts em minúsculas, sem `www.`
  */
 function extractDomains(content) {
@@ -52,10 +59,15 @@ function extractDomains(content) {
   const found = new Set();
 
   // Sequências tipo "sub.dominio.tld", com ou sem esquema na frente.
-  for (const match of text.matchAll(/(?:https?:\/\/)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)/g)) {
-    const host = match[1].replace(/^www\./, '');
+  for (const match of text.matchAll(/(https?:\/\/)?([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)/g)) {
+    const host = match[2].replace(/^www\./, '');
     const parts = host.split('.');
     if (parts.length < 2) continue;
+
+    if (match[1]) {
+      found.add(host);
+      continue;
+    }
 
     const tld = parts.at(-1);
     const twoLevel = parts.slice(-2).join('.');

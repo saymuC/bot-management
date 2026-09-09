@@ -19,6 +19,7 @@
 const FAMILIES = Object.freeze({
   spam: { label: 'Flood e spam', emoji: '💨' },
   links: { label: 'Links e convites', emoji: '🔗' },
+  media: { label: 'Mídia e anexos', emoji: '🖼️' },
   words: { label: 'Palavras proibidas', emoji: '🤬' },
   excess: { label: 'Excessos de formatação', emoji: '🔠' },
   raid: { label: 'Proteção contra raid', emoji: '🛡️' },
@@ -100,7 +101,7 @@ const bool = (label, def, hint) => ({ type: 'bool', label, default: def, hint })
 const list = (label, hint) => ({ type: 'list', label, default: [], hint });
 
 /**
- * As 19 regras. A ordem aqui é a ordem de avaliação no motor: o mais barato de
+ * As 20 regras. A ordem aqui é a ordem de avaliação no motor: o mais barato de
  * checar vem antes, e o motor para na primeira violação.
  */
 const RULES = Object.freeze({
@@ -160,8 +161,24 @@ const RULES = Object.freeze({
     description: 'Texto com pilhas de acentos combinantes, que estica a linha e some com a leitura.',
     fields: { percent: percent('Densidade máxima de acentos (%)', 30) },
   },
+  // ---- Mídia: olham os anexos da mensagem e os links de mídia no texto. ----
+  media: {
+    family: 'media',
+    label: 'Mídia e anexos',
+    emoji: '🖼️',
+    description:
+      'Barra imagem, gif, vídeo, arquivo e figurinha — inclusive link direto de mídia. ' +
+      'O canal onde isso é permitido entra nas isenções da regra.',
+    fields: {
+      images: bool('Barrar imagens', true, 'png, jpg, webp'),
+      gifs: bool('Barrar gifs', true, 'gif e links de tenor/giphy'),
+      videos: bool('Barrar vídeos', true, 'mp4, mov, webm'),
+      files: bool('Barrar outros arquivos', true, 'áudio, pdf, zip, exe'),
+      stickers: bool('Barrar figurinhas', true),
+    },
+  },
   attachmentTypes: {
-    family: 'excess',
+    family: 'media',
     label: 'Tipos de arquivo',
     emoji: '📎',
     description: 'Bloqueia anexos por extensão. Uma por linha, com ou sem ponto.',

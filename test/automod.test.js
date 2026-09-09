@@ -46,6 +46,7 @@ const {
   countWrittenMentions,
   extensionOf,
 } = require('../utils/automod/detectors/excess');
+const { detectors: media, classifyAttachment, findMediaLink } = require('../utils/automod/detectors/media');
 const { detectors: words } = require('../utils/automod/detectors/words');
 const { detectors: flood } = require('../utils/automod/detectors/flood');
 const { detectors: links, extractDomains, extractInviteCodes, matchesDomain, linkifiable } =
@@ -370,6 +371,51 @@ test('detector attachmentTypes aceita extensão com e sem ponto', () => {
   assert.equal(excess.attachmentTypes({ attachmentNames: [] }, limits), null);
 });
 
+test('classifyAttachment usa o contentType e cai na extensão', () => {
+  assert.equal(classifyAttachment({ name: 'a.png', contentType: 'image/png' }), 'images');
+  assert.equal(classifyAttachment({ name: 'a.gif', contentType: 'image/gif' }), 'gifs');
+  assert.equal(classifyAttachment({ name: 'a.mp4', contentType: 'video/mp4' }), 'videos');
+
+  // contentType nulo acontece; o nome resolve.
+  assert.equal(classifyAttachment({ name: 'foto.JPEG', contentType: '' }), 'images');
+  assert.equal(classifyAttachment({ name: 'meme.gif' }), 'gifs');
+  assert.equal(classifyAttachment({ name: 'clipe.webm' }), 'videos');
+
+  // Áudio e desconhecido caem no catch-all, que é o desfecho seguro.
+  assert.equal(classifyAttachment({ name: 'audio.mp3', contentType: 'audio/mpeg' }), 'files');
+  assert.equal(classifyAttachment({ name: 'sem-extensao' }), 'files');
+  assert.equal(classifyAttachment({}), 'files');
+});
+
+test('detector media barra anexo, figurinha e link de mídia', () => {
+  const all = limitsOf('media');
+  const ctx = (over) => ({ content: '', attachmentFiles: [], stickers: 0, ...over });
+
+  assert.match(media.media(ctx({ attachmentFiles: [{ name: 'a.png', contentType: 'image/png' }] }), all).detail, /imagem em anexo \(\.png\)/);
+  assert.match(media.media(ctx({ stickers: 1 }), all).detail, /figurinha/);
+  assert.match(media.media(ctx({ content: 'olha https://tenor.com/view/abc' }), all).detail, /link de gif: tenor\.com/);
+  assert.match(media.media(ctx({ content: 'veja i.imgur.com/x.png' }), all).detail, /link de imagem: i\.imgur\.com/);
+
+  // Texto puro passa, e o nome do arquivo nunca entra no detail.
+  assert.equal(media.media(ctx({ content: 'só conversa aqui' }), all), null);
+  assert.doesNotMatch(
+    media.media(ctx({ attachmentFiles: [{ name: '**grito**.png', contentType: 'image/png' }] }), all).detail,
+    /grito/
+  );
+});
+
+test('detector media respeita a categoria desligada', () => {
+  const onlyGifs = limitsOf('media', { images: false, videos: false, files: false, stickers: false });
+  const ctx = (over) => ({ content: '', attachmentFiles: [], stickers: 0, ...over });
+
+  assert.equal(media.media(ctx({ attachmentFiles: [{ name: 'a.png', contentType: 'image/png' }] }), onlyGifs), null);
+  assert.equal(media.media(ctx({ stickers: 3 }), onlyGifs), null);
+  assert.ok(media.media(ctx({ attachmentFiles: [{ name: 'a.gif', contentType: 'image/gif' }] }), onlyGifs));
+
+  // Link comum não vira violação de mídia: isso é da regra "Links em geral".
+  assert.equal(findMediaLink('entra em exemplo.com/pagina', limitsOf('media')), null);
+});
+
 test('detectores lines, emojis, spoilers e zalgo comparam com o limite', () => {
   assert.ok(excess.lines({ content: 'a\nb\nc\nd' }, limitsOf('lines', { max: 3 })));
   assert.equal(excess.lines({ content: 'a\nb\nc' }, limitsOf('lines', { max: 3 })), null);
@@ -408,12 +454,17 @@ test('linkifiable cola só o ponto disfarçado', () => {
   assert.doesNotMatch(linkifiable('obrigado. com certeza'), /obrigado\.com/);
 });
 
-test('extractDomains exige TLD conhecido', () => {
+test('extractDomains exige TLD conhecido só sem esquema', () => {
   assert.deepEqual(extractDomains('vai em exemplo.com agora'), ['exemplo.com']);
   assert.deepEqual(extractDomains('olha loja.com.br'), ['loja.com.br']);
   assert.deepEqual(extractDomains('www.exemplo.com'), ['exemplo.com']);
   // Nomes de arquivo e versões não são links.
   assert.deepEqual(extractDomains('abre o index.js da versão 1.2'), []);
+
+  // Com esquema, qualquer TLD conta: quem escreve https:// está mandando link.
+  assert.deepEqual(extractDomains('entra em https://premio.zyx'), ['premio.zyx']);
+  assert.deepEqual(extractDomains('hxxps://phish.qwerty/login'), ['phish.qwerty']);
+  assert.deepEqual(extractDomains('roda http://localhost:3000'), [], 'host sem ponto não é domínio');
 });
 
 test('matchesDomain cobre subdomínio', () => {
