@@ -63,6 +63,10 @@ const KEYS = Object.freeze(Object.keys(REGISTRY));
 
 /** `<:nome:id>` ou `<a:nome:id>`. */
 const CUSTOM_EMOJI_RE = /^<(a?):([\w~]{2,32}):(\d{17,21})>$/;
+/** Mesma coisa, mas para achar o emoji no meio de uma frase. */
+const CUSTOM_EMOJI_ANYWHERE_RE = /<(a?):([\w~]{2,32}):(\d{17,21})>/;
+/** Um grafema que o Discord aceita como emoji. */
+const UNICODE_EMOJI_RE = /\p{Extended_Pictographic}|\p{Emoji_Presentation}|[\u{1F1E6}-\u{1F1FF}]/u;
 
 /** Padrões de todas as chaves — usado como base de qualquer leitura. */
 const DEFAULT_EMOJIS = Object.freeze(
@@ -102,11 +106,32 @@ function parseEmojiInput(raw) {
 
   const graphemes = [...new Intl.Segmenter().segment(value)];
   if (graphemes.length !== 1) return { ok: false, error: 'Envie apenas **um** emoji, sem texto em volta.' };
-  if (!/\p{Extended_Pictographic}|\p{Emoji_Presentation}|[\u{1F1E6}-\u{1F1FF}]/u.test(value)) {
-    return { ok: false, error: 'Isso não parece um emoji.' };
-  }
+  if (!UNICODE_EMOJI_RE.test(value)) return { ok: false, error: 'Isso não parece um emoji.' };
 
   return { ok: true, value, custom: false };
+}
+
+/**
+ * Pega o primeiro emoji de um texto livre — é o que o usuário digita no chat,
+ * então pode vir com pontuação, espaços ou uma frase em volta.
+ *
+ * @returns {string|null} o emoji cru (`🎫` ou `<:nome:id>`) ou null se não houver.
+ */
+function extractFirstEmoji(text) {
+  const raw = String(text ?? '');
+
+  const custom = CUSTOM_EMOJI_ANYWHERE_RE.exec(raw);
+
+  let unicode = null;
+  for (const { segment, index } of new Intl.Segmenter().segment(raw)) {
+    if (UNICODE_EMOJI_RE.test(segment)) {
+      unicode = { value: segment, index };
+      break;
+    }
+  }
+
+  if (custom && (!unicode || custom.index < unicode.index)) return custom[0];
+  return unicode?.value ?? null;
 }
 
 /** Mescla o JSON salvo com os padrões, descartando chaves e valores inválidos. */
@@ -159,11 +184,18 @@ function resetGuildEmojis(guildId) {
   return { ...DEFAULT_EMOJIS };
 }
 
-/** True quando o emoji personalizado não está mais acessível para o bot nesta guild. */
+/**
+ * True quando o emoji personalizado não está acessível para o bot.
+ *
+ * O bot consegue usar emojis de qualquer servidor em que esteja, então a
+ * verificação é no cache global do client; o cache da guild é só o fallback
+ * para quando não há client (testes, objetos parciais).
+ */
 function isBrokenCustomEmoji(guild, value) {
   const custom = parseCustomEmoji(value);
   if (!custom || !guild) return false;
-  return !guild.emojis.cache.has(custom.id);
+  const cache = guild.client?.emojis?.cache ?? guild.emojis?.cache;
+  return cache ? !cache.has(custom.id) : false;
 }
 
 /**
@@ -192,6 +224,7 @@ module.exports = {
   DEFAULT_EMOJIS,
   parseCustomEmoji,
   parseEmojiInput,
+  extractFirstEmoji,
   normalizeEmojis,
   getGuildEmojis,
   saveGuildEmojis,

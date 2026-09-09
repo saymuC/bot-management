@@ -129,7 +129,8 @@ module.exports = {
         await routeBotStatus(interaction);
         return;
       }
-      // Painel do /config-emojis: select abre modal, então cuida do próprio ack.
+      // Painel do /config-emojis: o select entra em modo de escuta do chat e
+      // responde depois pelo editReply, então cuida do próprio ack.
       if (customId.startsWith('cfgemoji_')) {
         await routeEmojiConfig(interaction);
         return;
