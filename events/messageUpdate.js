@@ -15,12 +15,19 @@ module.exports = {
     const message = newMessage.partial ? await newMessage.fetch().catch(() => null) : newMessage;
     if (!message) return;
 
+    // Nem todo `messageUpdate` é uma edição: o Discord manda um para a própria
+    // mensagem quando resolve um anexo, gera o preview de um link ou a fixam. O
+    // texto continua o mesmo nesses casos, e reavaliar seria punir duas vezes o
+    // mesmo fato. `oldMessage` partial não tem "antes" para comparar — aí vale
+    // examinar, que é a burla de mandar "oi" e editar para o link depois.
+    const textChanged = oldMessage.partial || oldMessage.content !== message.content;
+
     // O AutoMod roda mesmo quando o log de edição não tem o "antes" para mostrar.
     // `track: false` porque editar não é mandar de novo: contar a edição no
     // histórico faria o anti-flood punir quem só corrigiu um typo.
-    if (await inspectMessage(message, { track: false })) return;
+    if (textChanged && (await inspectMessage(message, { track: false }))) return;
 
-    if (oldMessage.partial || oldMessage.content === message.content) return;
+    if (!textChanged) return;
 
     await logEvent(
       message.guild,

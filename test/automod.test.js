@@ -55,6 +55,7 @@ const { detectors: links, extractDomains, extractInviteCodes, matchesDomain, lin
 const { ladderStep, crossedStep } = require('../utils/automod/infractions');
 const { pickAction, noticeText, canNotify, NOTICE_COOLDOWN_MS } = require('../utils/automod/enforce');
 const { parseDuration, parseLadderLine, isInert, idleReason } = require('../handlers/automodSetupHandler');
+const { markHandled, wasHandled, HANDLED_TTL_MS } = require('../handlers/automodHandler');
 
 /** Limites de uma regra, com as sobrescritas do teste por cima. */
 const limitsOf = (key, overrides = {}) => ({ ...ruleDefaults(key).limits, ...overrides });
@@ -720,6 +721,22 @@ test('idleReason aponta a regra ligada que não vai agir', () => {
   );
   assert.equal(idleReason('media', media({ watchChannelIds: ['c'] })), null, 'configurada: age');
   assert.equal(idleReason('media', { ...ruleDefaults('media'), enabled: false }), null, 'desligada não é aviso');
+});
+
+test('a trava por id impede punir a mesma mensagem duas vezes', () => {
+  const id = '900000000000000001';
+  const t0 = 1_000_000;
+
+  assert.equal(wasHandled(id, t0), false, 'mensagem nova ainda não foi punida');
+
+  markHandled(id, t0);
+  // É este caso que o bug produzia: o `messageUpdate` do anexo chegando segundos
+  // depois do `messageCreate` que já apagou e puniu.
+  assert.equal(wasHandled(id, t0 + 2000), true);
+
+  // Passado o prazo a entrada é descartada, senão o Map cresceria para sempre.
+  assert.equal(wasHandled(id, t0 + HANDLED_TTL_MS + 1), false);
+  assert.equal(wasHandled(id, t0 + 2000), false, 'entrada expirada não volta');
 });
 
 test('isInert aponta a regra ligada que não faz nada', () => {

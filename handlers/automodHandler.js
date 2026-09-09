@@ -29,6 +29,38 @@ const attachmentFiles = (message) =>
   [...message.attachments.values()].map((a) => ({ name: a.name ?? '', contentType: a.contentType ?? '' }));
 
 /**
+ * Mensagens já punidas, `id` -> instante. Uma punição por mensagem.
+ *
+ * Existe porque o Discord manda `messageUpdate` para a **mesma** mensagem sem
+ * ninguém tê-la editado: ao resolver um anexo, ao gerar o preview de um link, ao
+ * fixar. Sem esta trava, um pdf no canal errado rendia duas punições — a segunda
+ * com "não conseguiu apagar", porque a primeira já havia apagado.
+ */
+const handled = new Map();
+
+/** Depois disto a mensagem não vai mais reaparecer em update automático. */
+const HANDLED_TTL_MS = 5 * 60 * 1000;
+
+/** Teto do Map: infratoras são poucas, mas o processo do bot fica dias no ar. */
+const HANDLED_MAX = 1000;
+
+function markHandled(messageId, now = Date.now()) {
+  if (handled.size >= HANDLED_MAX) {
+    for (const [id, at] of handled) if (now - at >= HANDLED_TTL_MS) handled.delete(id);
+  }
+  handled.set(messageId, now);
+}
+
+function wasHandled(messageId, now = Date.now()) {
+  const at = handled.get(messageId);
+  if (at === undefined) return false;
+  if (now - at < HANDLED_TTL_MS) return true;
+
+  handled.delete(messageId);
+  return false;
+}
+
+/**
  * Mensagens que o AutoMod nunca examina.
  *
  * Bots e webhooks ficam de fora porque quem os adicionou já tem controle sobre
@@ -50,6 +82,10 @@ function isIgnorable(message) {
  */
 async function inspectMessage(message, { track = true } = {}) {
   if (isIgnorable(message)) return false;
+
+  // Já punida: devolve `true` para quem chamou tratar como violação (é o que foi)
+  // sem punir de novo.
+  if (wasHandled(message.id)) return true;
 
   const config = getAutomodConfig(message.guild.id);
   if (!config.enabled) return false;
@@ -105,6 +141,11 @@ async function inspectMessage(message, { track = true } = {}) {
 
   if (!violation) return false;
 
+  // Marcado antes de agir: se `enforce` falhar no meio (apagou e não conseguiu
+  // silenciar), o update automático que vem em seguida não pode tentar de novo e
+  // somar pontos pelo mesmo fato.
+  markHandled(message.id, now);
+
   await enforce(message, violation, config).catch((err) => {
     console.error(`[automod] Falha ao aplicar ação em ${message.guild.id}:`, err.message);
   });
@@ -145,4 +186,12 @@ async function dryRun({ guild, member, channelId, content }) {
   return violation ? { key: violation.key, label: violation.label, detail: violation.detail } : null;
 }
 
-module.exports = { inspectMessage, dryRun, isIgnorable, signatureOf };
+module.exports = {
+  inspectMessage,
+  dryRun,
+  isIgnorable,
+  signatureOf,
+  HANDLED_TTL_MS,
+  markHandled,
+  wasHandled,
+};

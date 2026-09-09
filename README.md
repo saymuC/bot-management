@@ -132,6 +132,8 @@ O motor avalia da regra mais barata para a mais cara e **para na primeira viola�
 
 A edição de mensagem também passa pelo filtro (senão a burla seria mandar "oi" e editar para o link), mas não conta no histórico de flood — corrigir um typo três vezes não é mandar três mensagens.
 
+**Uma punição por mensagem.** O Discord manda um evento de atualização para a própria mensagem sem ninguém tê-la editado: quando resolve um anexo, quando gera o preview de um link, quando alguém fixa. O bot reexamina só quando o **texto** mudou de fato, e além disso guarda por 5 minutos os ids que já renderam punição. Sem as duas travas um PDF no canal errado dava duas advertências — a segunda com "não conseguiu apagar", porque a primeira já havia apagado a mensagem.
+
 ### Canal só de texto: mídia e links
 
 Duas regras cobrem isso, e o alcance de cada uma é o oposto do da outra — de propósito.
