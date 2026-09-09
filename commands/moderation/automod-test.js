@@ -10,8 +10,8 @@ const { respond } = require('../../utils/interactions');
 const { baseEmbed } = require('../../utils/embeds');
 const { colors } = require('../../config/settings');
 const { formatDuration } = require('../../utils/time');
-const { RULES, ACTIONS, NOTIFY_MODES } = require('../../config/automodRules');
-const { getAutomodConfig, exemptionReason } = require('../../utils/automod/config');
+const { RULES, ACTIONS, NOTIFY_MODES, WATCHLIST_RULE_KEYS } = require('../../config/automodRules');
+const { getAutomodConfig, exemptionReason, watchesChannel } = require('../../utils/automod/config');
 const { dryRun } = require('../../handlers/automodHandler');
 
 module.exports = {
@@ -65,6 +65,22 @@ module.exports = {
     ];
 
     if (exempt) fields.push({ name: '🪪 Isenção global', value: `Este membro/canal está livre: **${exempt}**.`, inline: false });
+
+    // Regra de alcance restrito fora do seu canal: é a segunda explicação mais
+    // comum para "liguei e não pegou nada", e o resultado abaixo diria só "passou".
+    const notWatching = WATCHLIST_RULE_KEYS.filter(
+      (key) => config.rules[key].enabled && !watchesChannel(key, config.rules[key], member, channel.id)
+    );
+
+    if (notWatching.length) {
+      fields.push({
+        name: '👁️ Não vigia este canal',
+        value:
+          `${notWatching.map((key) => `${RULES[key].emoji} **${RULES[key].label}**`).join(', ')} — ` +
+          `vale só nos canais vigiados, e ${channel} não está entre eles.`,
+        inline: false,
+      });
+    }
 
     if (violation) {
       const rule = config.rules[violation.key];

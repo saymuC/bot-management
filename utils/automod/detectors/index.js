@@ -8,7 +8,7 @@
  */
 
 const { MESSAGE_RULE_KEYS, RULES } = require('../../../config/automodRules');
-const { exemptionReason } = require('../config');
+const { exemptionReason, watchesChannel } = require('../config');
 const { detectors: excess } = require('./excess');
 const { detectors: media } = require('./media');
 const { detectors: links } = require('./links');
@@ -35,6 +35,10 @@ async function findViolation(ctx, config) {
   for (const key of MESSAGE_RULE_KEYS) {
     const rule = config.rules[key];
     if (!rule?.enabled) continue;
+
+    // Alcance antes de isenção: a regra de mídia vale só nos canais vigiados, e
+    // fora deles não há o que isentar.
+    if (!watchesChannel(key, rule, ctx.member, ctx.channelId)) continue;
 
     // Isenção é checada por regra, não uma vez só: cada regra tem as suas, e o
     // canal isento de "links" pode continuar valendo para "palavras".

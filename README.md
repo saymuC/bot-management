@@ -97,9 +97,9 @@ O motor roda **no próprio bot**, não no AutoMod nativo do Discord. Em troca de
 
 `/automod` abre o painel (sem parâmetros). Tudo é salvo na hora, sem botão "salvar". São três telas:
 
-- **Início** — menu com as 20 regras (✅/▫️ indicando ligada), select do canal de logs do AutoMod e os botões `[Ligar/Desligar o AutoMod] [Isenções globais] [Escada] [Isentar mods: sim/não] [Fechar]`. O resumo destaca as regras **ligadas mas sem efeito** (sem apagar, sem ação e sem pontos) — é o erro de configuração mais fácil de cometer.
-- **Regra** — quatro selects (ação imediata, pontos de 0–10, quem vê o aviso, quanto tempo o aviso fica) e os botões `[Ligar/Desligar] [Apagar: sim/não] [Limites…] [Isenções] [Voltar]`. "Limites…" abre um modal com os campos daquela regra; listas (palavras, domínios, extensões) vêm uma por linha.
-- **Isenções** — `RoleSelect` + `ChannelSelect` (múltiplos), tanto no escopo global quanto por regra.
+- **Início** — menu com as 20 regras (✅/▫️ indicando ligada), select do canal de logs do AutoMod e os botões `[Ligar/Desligar o AutoMod] [Isenções globais] [Escada] [Isentar mods: sim/não] [Fechar]`. O resumo lista as regras **ligadas mas sem efeito** e diz o motivo de cada uma (nenhum canal vigiado, nenhuma categoria marcada, ou nem apaga nem pune nem pontua) — é o erro de configuração mais fácil de cometer.
+- **Regra** — quatro selects (ação imediata, pontos de 0–10, quem vê o aviso, quanto tempo o aviso fica) e os botões `[Ligar/Desligar] [Apagar: sim/não] [Limites…] [Isenções] [Voltar]`. "Limites…" abre um modal com os campos daquela regra; listas (palavras, domínios, extensões) vêm uma por linha. Nas regras de alcance restrito o quarto botão vira `[Canais vigiados]`, em azul enquanto nenhum canal foi escolhido.
+- **Isenções** — `RoleSelect` + `ChannelSelect` (múltiplos), tanto no escopo global quanto por regra. Nas regras de alcance restrito ganha um `ChannelSelect` a mais, o dos canais vigiados.
 
 O AutoMod só age depois de `[Ligar o AutoMod]`: ligar uma regra sozinha não basta, o que permite configurar tudo com calma antes de valer.
 
@@ -114,7 +114,7 @@ O AutoMod só age depois de `[Ligar o AutoMod]`: ligar uma regra sozinha não ba
 | Excesso de linhas | Excessos | O "muro de texto" | máximo de linhas |
 | Excesso de spoilers | Excessos | Muitos blocos `\|\|spoiler\|\|` | máximo de spoilers |
 | Zalgo | Excessos | Pilhas de acentos combinantes que esticam a linha | densidade máxima (%) |
-| Mídia e anexos | Mídia | Imagem, gif, vídeo, arquivo, figurinha e link direto de mídia | barrar imagens, gifs, vídeos, outros arquivos, figurinhas |
+| Mídia e anexos | Mídia | Imagem, gif, vídeo, arquivo, figurinha e link direto de mídia — **só nos canais vigiados** | barrar imagens, gifs, vídeos, outros arquivos, figurinhas |
 | Tipos de arquivo | Mídia | Anexos por extensão | extensões bloqueadas |
 | Convites do Discord | Links | `discord.gg` e afins | permitir convite deste servidor |
 | Domínios bloqueados | Links | Lista sempre barrada, mesmo se estiver na de permitidos | domínios bloqueados |
@@ -134,7 +134,11 @@ A edição de mensagem também passa pelo filtro (senão a burla seria mandar "o
 
 ### Canal só de texto: mídia e links
 
-Duas regras cobrem isso, e em ambas **quais canais podem** é a lista de isenções da própria regra — ligue a regra para o servidor e isente `#memes`.
+Duas regras cobrem isso, e o alcance de cada uma é o oposto do da outra — de propósito.
+
+**Mídia e anexos** vale **só nos canais vigiados**, escolhidos no botão `[Canais vigiados]` da regra. Enquanto a lista estiver vazia a regra não vale em lugar nenhum, mesmo ligada, e o painel diz isso na cara. A inversão é deliberada: num servidor comum mandar foto é normal e proibido em dois ou três cantos (`#regras`, `#avisos`, `#suporte`), então listar esses dois é curto e listar os trinta que podem mandar foto não é. Escolher uma **categoria** vigia os canais dela; escolher um canal vigia os tópicos dele. As isenções da regra continuam existindo e abrem exceções *dentro* dos canais vigiados — um cargo de staff que pode mandar print no `#suporte`, por exemplo.
+
+Tudo o mais no AutoMod segue o alcance normal: vale em todo canal, menos as isenções. A regra de mídia é a única que restringe hoje; a flag (`watchlist`) está no catálogo e serve para qualquer regra futura em que essa leitura fizer sentido.
 
 **Mídia e anexos** barra as cinco categorias, cada uma com seu interruptor: imagens (`png`, `jpg`, `webp`), gifs (`gif` e link de `tenor.com`/`giphy.com`), vídeos (`mp4`, `mov`, `webm`), outros arquivos (áudio, pdf, zip, exe — tudo o que não é imagem, gif nem vídeo) e figurinhas. Ligar a regra barra tudo; desmarque no `[Limites…]` o que quiser permitir. A categoria é decidida pelo `content-type` que o Discord manda, com a extensão do nome como reserva — anexo sem tipo identificável cai em "outros arquivos", porque quem barrou o resto quis dizer "só texto".
 
@@ -142,7 +146,7 @@ A regra pega os **dois** caminhos pelos quais mídia entra num canal: o anexo e 
 
 **Links em geral** barra qualquer URL: deixe a lista de permitidos vazia e nada passa; preencha e só o que está nela passa (subdomínios incluídos). O link é reconhecido sem `http://` e por baixo de disfarces (`site [.] com`, `hxxp://`), mas sem esquema é preciso um TLD conhecido — a lista cobre o que aparece em divulgação e golpe, e é o que impede "abre o index.js" de virar infração. **Com** `https://` na frente, qualquer TLD conta, inclusive os exóticos: quem escreveu o esquema declarou que é link.
 
-O relatório do `/automod-test` só recebe texto, então ele mostra o que estiver **escrito** (link de imagem, gif de tenor) e não tem como simular anexo, arquivo ou figurinha.
+O relatório do `/automod-test` só recebe texto, então ele mostra o que estiver **escrito** (link de imagem, gif de tenor) e não tem como simular anexo, arquivo ou figurinha. Quando a regra de mídia está ligada mas não vigia o canal testado, o relatório diz isso em vez de deixar o "passou" sem explicação.
 
 ### Ação imediata, pontos e escada
 
@@ -204,7 +208,7 @@ A única exceção é explícita e **desligada por padrão**: o botão `[Isentar
 
 > Se você ligar, isso vale para **você** também — é a explicação mais comum para "configurei tudo e nada aconteceu". O painel avisa em cima quando quem está lendo está isento, e o `/automod-test` diz o mesmo.
 
-Fora das isenções, o AutoMod vale em **todo** canal que o bot consegue ver — não existe lista de canais onde ele age, só a lista de onde ele não age.
+Fora das isenções, o AutoMod vale em **todo** canal que o bot consegue ver. A exceção é a regra de **Mídia e anexos**, que funciona ao contrário: ela tem uma lista de canais vigiados e só age neles (ver *Canal só de texto*). As isenções continuam valendo por cima, para abrir exceção dentro dos canais vigiados.
 
 `/automod-test texto:"..."` confere um texto contra as regras ligadas sem punir ninguém, e diz o que aconteceria: qual regra pegou, por quê, se apagaria, qual ação, quantos pontos e onde avisaria. Aceita `canal:` e `como:` para simular outro canal ou outro membro — inclusive para descobrir que a resposta é "nada, esse membro está isento". Regras de flood e repetição dependem do histórico real e não são simuladas.
 

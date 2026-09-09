@@ -116,6 +116,7 @@ function normalizeRule(ruleKey, raw) {
     noticeTtlMs: normalizeNoticeTtl(source.noticeTtlMs, defaults.noticeTtlMs),
     exemptRoleIds: normalizeIds(source.exemptRoleIds),
     exemptChannelIds: normalizeIds(source.exemptChannelIds),
+    watchChannelIds: normalizeIds(source.watchChannelIds),
     limits: normalizeLimits(ruleKey, source.limits),
   };
 }
@@ -207,6 +208,40 @@ function updateConfig(guildId, changes) {
 }
 
 /**
+ * Categoria (ou canal-pai, no caso de tópico) do canal, se der para resolver.
+ *
+ * Vem do cache: em canal que o bot nunca viu devolve `null`, e aí a checagem cai
+ * no id do próprio canal — que é o que sempre está em mãos.
+ */
+function parentOf(member, channelId) {
+  if (!member || !channelId) return null;
+  return member.guild?.channels?.cache?.get(channelId)?.parentId ?? null;
+}
+
+/**
+ * Esta regra vigia o canal onde a mensagem foi mandada?
+ *
+ * Só as regras `watchlist` restringem: as outras valem no servidor todo e a
+ * resposta é sempre `true`. Para as que restringem, lista vazia é "nenhum canal",
+ * não "todos" — o alcance da regra **é** a lista, e assumir "todos" quando ela
+ * está vazia transformaria a regra recém-ligada num filtro de servidor inteiro,
+ * exatamente o oposto do que o admin pediu ao escolher canais.
+ *
+ * Escolher uma **categoria** vigia os canais dela; escolher um canal vigia os
+ * tópicos dele — mesma leitura das isenções.
+ */
+function watchesChannel(ruleKey, rule, member, channelId) {
+  if (!RULES[ruleKey]?.watchlist) return true;
+
+  const watched = rule.watchChannelIds ?? [];
+  if (!watched.length) return false;
+  if (channelId && watched.includes(channelId)) return true;
+
+  const parentId = parentOf(member, channelId);
+  return Boolean(parentId && watched.includes(parentId));
+}
+
+/**
  * Por que o membro está livre desta regra, ou null se não está.
  *
  * As isenções são **só** as do bot: cargo, canal e o interruptor de moderador.
@@ -225,8 +260,8 @@ function exemptionReason(config, rule, member, channelId) {
   const channels = new Set([...config.exemptChannelIds, ...rule.exemptChannelIds]);
   if (channelId && channels.has(channelId)) return 'canal isento';
   // Thread isenta quando o canal-pai é: quem isenta #suporte espera valer nos tópicos dele.
-  if (channels.size && member) {
-    const parentId = member.guild.channels.cache.get(channelId)?.parentId;
+  if (channels.size) {
+    const parentId = parentOf(member, channelId);
     if (parentId && channels.has(parentId)) return 'categoria/canal-pai isento';
   }
 
@@ -253,4 +288,5 @@ module.exports = {
   updateRule,
   updateConfig,
   exemptionReason,
+  watchesChannel,
 };

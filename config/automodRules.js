@@ -13,6 +13,11 @@
  *   percent — inteiro de 0 a 100
  *   bool    — o usuário escreve sim/não
  *   list    — uma entrada por linha (palavras, domínios, extensões)
+ *
+ * `watchlist: true` inverte o alcance da regra: em vez de valer em todo canal
+ * menos as isenções, ela vale **só** nos canais escolhidos. Serve para o que é
+ * normal no servidor e proibido em alguns cantos — mídia é o caso: listar os
+ * dois canais só-texto é curto, listar os trinta que podem mandar foto não é.
  */
 
 /** Famílias, na ordem em que aparecem no painel. */
@@ -93,6 +98,9 @@ const BASE_DEFAULTS = Object.freeze({
   noticeTtlMs: 0,
   exemptRoleIds: [],
   exemptChannelIds: [],
+  // Só as regras `watchlist` leem isto. Vazio significa "nenhum canal vigiado",
+  // e não "todos": quem escolhe os canais espera que a escolha seja a fronteira.
+  watchChannelIds: [],
 });
 
 const int = (label, def, min, max, hint) => ({ type: 'int', label, default: def, min, max, hint });
@@ -166,9 +174,10 @@ const RULES = Object.freeze({
     family: 'media',
     label: 'Mídia e anexos',
     emoji: '🖼️',
+    watchlist: true,
     description:
       'Barra imagem, gif, vídeo, arquivo e figurinha — inclusive link direto de mídia. ' +
-      'O canal onde isso é permitido entra nas isenções da regra.',
+      'Vale só nos canais vigiados: sem nenhum escolhido, a regra não faz nada.',
     fields: {
       images: bool('Barrar imagens', true, 'png, jpg, webp'),
       gifs: bool('Barrar gifs', true, 'gif e links de tenor/giphy'),
@@ -318,6 +327,9 @@ const MESSAGE_RULE_KEYS = Object.freeze(RULE_KEYS.filter((key) => RULES[key].fam
 /** Regras avaliadas na entrada de um membro. */
 const RAID_RULE_KEYS = Object.freeze(RULE_KEYS.filter((key) => RULES[key].family === 'raid'));
 
+/** Regras que valem só nos canais vigiados. */
+const WATCHLIST_RULE_KEYS = Object.freeze(RULE_KEYS.filter((key) => RULES[key].watchlist === true));
+
 /** Defaults completos de uma regra: base + sobrescritas + limites do catálogo. */
 function ruleDefaults(key) {
   const rule = RULES[key];
@@ -341,5 +353,6 @@ module.exports = {
   RULE_KEYS,
   MESSAGE_RULE_KEYS,
   RAID_RULE_KEYS,
+  WATCHLIST_RULE_KEYS,
   ruleDefaults,
 };

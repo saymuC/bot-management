@@ -60,11 +60,37 @@ const ruleTitle = (key) => `${RULES[key].emoji} ${RULES[key].label}`;
 /** Regra ligada mas sem apagar, sem ação e sem pontos: não faz nada. */
 const isInert = (rule) => rule.enabled && !rule.deleteMessage && rule.action === 'none' && rule.points === 0;
 
+/**
+ * Por que esta regra ligada não vai agir, ou null se ela age.
+ *
+ * Três formas de uma regra ficar verde no painel e não fazer nada: não vigiar
+ * canal nenhum, não ter categoria de mídia marcada, ou não apagar/punir/pontuar.
+ * O admin não tem como adivinhar nenhuma das três olhando o "🟢 Ligado".
+ */
+function idleReason(key, rule) {
+  if (!rule.enabled) return null;
+  if (RULES[key].watchlist && !rule.watchChannelIds.length) return 'nenhum canal vigiado';
+  if (key === 'media' && MEDIA_KINDS.every((kind) => !rule.limits[kind])) return 'nenhuma categoria marcada';
+  if (isInert(rule)) return 'não apaga, não pune e não dá pontos';
+  return null;
+}
+
+/** O que fazer a respeito de cada motivo, na tela da regra. */
+const IDLE_FIX = Object.freeze({
+  'nenhum canal vigiado':
+    'Ela vale **só** nos canais vigiados e nenhum foi escolhido. Abra *Canais vigiados* e escolha ao menos um.',
+  'nenhuma categoria marcada':
+    'Não barra imagem, gif, vídeo, arquivo nem figurinha. Marque ao menos uma em *Limites…*.',
+  'não apaga, não pune e não dá pontos': 'Escolha uma ação, ligue o *Apagar* ou dê pontos.',
+});
+
 // ---------------------------------------------------------------- tela: início
 
 function homeEmbed(config, guild) {
   const enabledKeys = RULE_KEYS.filter((key) => config.rules[key].enabled);
-  const inert = enabledKeys.filter((key) => isInert(config.rules[key]));
+  const idle = enabledKeys
+    .map((key) => ({ key, reason: idleReason(key, config.rules[key]) }))
+    .filter((item) => item.reason);
 
   const byFamily = Object.entries(FAMILIES).map(([family, meta]) => {
     const keys = RULE_KEYS.filter((key) => RULES[key].family === family);
@@ -106,10 +132,10 @@ function homeEmbed(config, guild) {
     },
   ];
 
-  if (inert.length) {
+  if (idle.length) {
     fields.push({
       name: '⚠️ Ligadas mas sem efeito',
-      value: `${inert.map((key) => RULES[key].label).join(', ')} — sem apagar, sem ação e sem pontos.`,
+      value: idle.map((item) => `**${RULES[item.key].label}** — ${item.reason}`).join('\n').slice(0, 1024),
       inline: false,
     });
   }
@@ -254,7 +280,7 @@ function ruleEmbed(key, config, guild) {
       inline: true,
     },
     {
-      name: 'Isenções desta regra',
+      name: meta.watchlist ? 'Isenções (dentro dos vigiados)' : 'Isenções desta regra',
       value:
         [
           rule.exemptRoleIds.length ? `${rule.exemptRoleIds.length} cargo(s)` : null,
@@ -265,6 +291,18 @@ function ruleEmbed(key, config, guild) {
       inline: true,
     },
   ];
+
+  // Regra de alcance restrito: mostra os canais por menção, não a contagem. "2
+  // canais" não responde a pergunta que o admin tem, que é *quais*.
+  if (meta.watchlist) {
+    fields.push({
+      name: 'Canais vigiados',
+      value:
+        rule.watchChannelIds.map((id) => `<#${id}>`).join(' ') ||
+        '**nenhum** — a regra não vale em canal algum enquanto isto estiver vazio.',
+      inline: false,
+    });
+  }
 
   const limitEntries = Object.entries(meta.fields);
   if (limitEntries.length) {
@@ -289,24 +327,8 @@ function ruleEmbed(key, config, guild) {
 
   if (listPreview.length) fields.push({ name: 'Conteúdo das listas', value: listPreview.join('\n').slice(0, 1024) });
 
-  // Caso próprio da regra de mídia: ela não tem número nem lista, só as cinco
-  // categorias. Desligadas todas, a regra fica verde no painel e não checa nada —
-  // e o `isInert` genérico não vê isso, porque a ação e os pontos continuam lá.
-  if (key === 'media' && rule.enabled && MEDIA_KINDS.every((kind) => !rule.limits[kind])) {
-    fields.push({
-      name: '⚠️ Nenhuma categoria marcada',
-      value: 'Está ligada, mas não barra imagem, gif, vídeo, arquivo nem figurinha. Marque ao menos uma em "Limites…".',
-      inline: false,
-    });
-  }
-
-  if (isInert(rule)) {
-    fields.push({
-      name: '⚠️ Sem efeito',
-      value: 'Está ligada, mas não apaga, não pune e não dá pontos. Escolha uma ação ou dê pontos.',
-      inline: false,
-    });
-  }
+  const idle = idleReason(key, rule);
+  if (idle) fields.push({ name: `⚠️ Sem efeito: ${idle}`, value: IDLE_FIX[idle], inline: false });
 
   return baseEmbed({
     title: ruleTitle(key),
@@ -407,9 +429,12 @@ function ruleComponents(key, config) {
       .setDisabled(!hasLimits),
     new ButtonBuilder()
       .setCustomId(`${PREFIX}exempt:${key}`)
-      .setLabel('Isenções')
-      .setEmoji('🪪')
-      .setStyle(ButtonStyle.Secondary),
+      // Numa regra de alcance restrito, escolher os canais é o passo sem o qual
+      // ela não faz nada: o botão precisa anunciar isso, não esconder atrás de
+      // "Isenções".
+      .setLabel(RULES[key].watchlist ? 'Canais vigiados' : 'Isenções')
+      .setEmoji(RULES[key].watchlist ? '👁️' : '🪪')
+      .setStyle(RULES[key].watchlist && !rule.watchChannelIds.length ? ButtonStyle.Primary : ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`${PREFIX}home`).setLabel('Voltar').setEmoji('◀️').setStyle(ButtonStyle.Secondary)
   );
 
@@ -427,7 +452,10 @@ const rulePayload = (key, config, guild, notice = '') => ({
 
 function exemptPayload(key, config, guild, notice = '') {
   const scope = key ? config.rules[key] : config;
-  const title = key ? `Isenções de ${RULES[key].label}` : 'Isenções globais';
+  const watchlist = Boolean(key && RULES[key].watchlist);
+  const title = key
+    ? `${watchlist ? 'Canais e isenções' : 'Isenções'} de ${RULES[key].label}`
+    : 'Isenções globais';
 
   const rolesRow = new ActionRowBuilder().addComponents(
     new RoleSelectMenuBuilder()
@@ -447,6 +475,16 @@ function exemptPayload(key, config, guild, notice = '') {
       .setDefaultChannels(scope.exemptChannelIds)
   );
 
+  const watchRow = !watchlist ? null : new ActionRowBuilder().addComponents(
+    new ChannelSelectMenuBuilder()
+      .setCustomId(`${PREFIX}wchannels:${key}`)
+      .setPlaceholder('👁️ Canais e categorias onde a regra vale')
+      .addChannelTypes(...TEXT_CHANNEL_TYPES)
+      .setMinValues(0)
+      .setMaxValues(25)
+      .setDefaultChannels(scope.watchChannelIds ?? [])
+  );
+
   const buttons = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(key ? `${PREFIX}rule:${key}` : `${PREFIX}home`)
@@ -456,32 +494,42 @@ function exemptPayload(key, config, guild, notice = '') {
     new ButtonBuilder().setCustomId(`${PREFIX}close`).setLabel('Fechar').setEmoji('❌').setStyle(ButtonStyle.Secondary)
   );
 
+  const fields = [];
+
+  if (watchlist) {
+    fields.push({
+      name: '👁️ Canais vigiados',
+      value:
+        scope.watchChannelIds.map((id) => `<#${id}>`).join(' ') ||
+        '**nenhum** — enquanto estiver vazio, a regra não vale em canal algum.',
+      inline: false,
+    });
+  }
+
+  fields.push(
+    { name: 'Cargos isentos', value: scope.exemptRoleIds.map((id) => `<@&${id}>`).join(' ') || 'nenhum', inline: false },
+    { name: 'Canais isentos', value: scope.exemptChannelIds.map((id) => `<#${id}>`).join(' ') || 'nenhum', inline: false }
+  );
+
+  const description = [
+    watchlist
+      ? 'Esta regra vale **só** nos canais vigiados — em todo o resto do servidor ela nem é consultada.'
+      : 'Quem tem cargo isento ou fala em canal isento não é filtrado.',
+    'Escolher uma **categoria** alcança os canais dela; escolher um canal alcança os tópicos dele.',
+    watchlist ? 'As isenções abaixo abrem exceções **dentro** dos canais vigiados (um cargo de staff, por exemplo).' : null,
+    key ? '\nEstas isenções somam com as globais.' : '\nValem para **todas** as regras.',
+  ].filter(Boolean);
+
   return {
-    content: notice || `🪪 **${title}** — selecione para isentar, desmarque para voltar a valer.`,
+    content:
+      notice ||
+      (watchlist
+        ? `👁️ **${title}** — escolha onde a regra vale; desmarque para deixar de vigiar.`
+        : `🪪 **${title}** — selecione para isentar, desmarque para voltar a valer.`),
     embeds: [
-      baseEmbed({
-        title,
-        description: [
-          'Quem tem cargo isento ou fala em canal isento não é filtrado.',
-          'Isentar uma **categoria** isenta os canais dela; isentar um canal isenta os tópicos dele.',
-          key ? '\nEstas isenções somam com as globais.' : '\nValem para **todas** as regras.',
-        ].join('\n'),
-        fields: [
-          {
-            name: 'Cargos',
-            value: scope.exemptRoleIds.map((id) => `<@&${id}>`).join(' ') || 'nenhum',
-            inline: false,
-          },
-          {
-            name: 'Canais',
-            value: scope.exemptChannelIds.map((id) => `<#${id}>`).join(' ') || 'nenhum',
-            inline: false,
-          },
-        ],
-        footer: `Servidor: ${guild.name}`,
-      }),
+      baseEmbed({ title, description: description.join('\n'), fields, footer: `Servidor: ${guild.name}` }),
     ],
-    components: [rolesRow, channelsRow, buttons],
+    components: watchlist ? [watchRow, rolesRow, channelsRow, buttons] : [rolesRow, channelsRow, buttons],
     allowedMentions: { parse: [] },
   };
 }
@@ -691,6 +739,15 @@ function handleExemptSelect(interaction, key, ids, kind) {
   );
 }
 
+function handleWatchSelect(interaction, key, ids) {
+  const config = updateRule(interaction.guild.id, key, { watchChannelIds: ids });
+  const notice = ids.length
+    ? `👁️ Vigiando ${ids.length} canal(is)/categoria(s).`
+    : '👁️ Nenhum canal vigiado — a regra deixou de valer em qualquer lugar.';
+
+  return safeAck(interaction, () => interaction.update(exemptPayload(key, config, interaction.guild, notice)));
+}
+
 function handleToggleAll(interaction, config) {
   const enabled = !config.enabled;
   if (enabled && !RULE_KEYS.some((key) => config.rules[key].enabled)) {
@@ -751,10 +808,8 @@ async function routeAutomodSetup(interaction) {
     case 'toggle': {
       const rule = config.rules[key];
       const enabled = !rule.enabled;
-      const warning =
-        enabled && isInert({ ...rule, enabled })
-          ? ' ⚠️ Mas ela não apaga, não pune e não dá pontos — configure algo.'
-          : '';
+      const idle = enabled ? idleReason(key, { ...rule, enabled }) : null;
+      const warning = idle ? ` ⚠️ Mas: ${idle}.` : '';
       return saveRule(interaction, key, { enabled }, `${enabled ? '🟢 Ligado' : '🔴 Desligado'}: ${RULES[key].label}.${warning}`);
     }
     case 'delete':
@@ -801,6 +856,8 @@ async function routeAutomodSetup(interaction) {
       return handleExemptSelect(interaction, key, interaction.values, 'roles');
     case 'exchannels':
       return handleExemptSelect(interaction, key, interaction.values, 'channels');
+    case 'wchannels':
+      return handleWatchSelect(interaction, key, interaction.values);
 
     case 'ladder':
       return showLadderModal(interaction, config);
@@ -831,5 +888,6 @@ module.exports = {
   parseDuration,
   parseLadderLine,
   isInert,
+  idleReason,
   routeAutomodSetup,
 };
