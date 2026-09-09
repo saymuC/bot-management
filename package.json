@@ -13,6 +13,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.9",
     "better-sqlite3": "^13.0.3",
     "dayjs": "^1.11.23",
     "discord.js": "^14.27.0",

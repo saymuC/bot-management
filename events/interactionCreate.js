@@ -1,4 +1,4 @@
-const { Events, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Events, MessageFlags } = require('discord.js');
 const { routeTicketInteraction } = require('../handlers/ticketHandler');
 const { handleEntryButton } = require('../handlers/giveawayHandler');
 const { handleStatsPagination } = require('../handlers/ticketStatsHandler');
@@ -6,45 +6,13 @@ const { routeEmbedInteraction } = require('../handlers/embedHandler');
 const { routeWelcomeSetup } = require('../handlers/welcomeSetupHandler');
 const { routeBotStatus } = require('../handlers/botStatusHandler');
 const { routeEmojiConfig } = require('../handlers/emojiConfigHandler');
-const { isOAuthEnabled, createOAuthUrl } = require('../oauth/server');
-const { db, getGuildConfig } = require('../database/db');
+const { routeVerifyInteraction } = require('../handlers/verifyHandler');
+const { routeVerifySetup } = require('../handlers/verifySetupHandler');
+const { db } = require('../database/db');
 const { errorEmbed, successEmbed } = require('../utils/embeds');
 const { respond } = require('../utils/interactions');
 
 const reactionRoleStmt = db.prepare('SELECT * FROM reaction_roles WHERE id = ?');
-
-async function handleVerifyButton(interaction) {
-  const config = getGuildConfig(interaction.guild.id);
-  if (!config?.verify_role_id) {
-    return respond(interaction, { embeds: [errorEmbed('Verificação não configurada neste servidor.')] });
-  }
-  try {
-    await interaction.member.roles.add(config.verify_role_id, 'Verificação via botão');
-
-    // se OAuth estiver configurado, oferece também a conexão da conta (guilds.join)
-    if (isOAuthEnabled()) {
-      return respond(interaction, {
-        embeds: [
-          successEmbed(
-            'Você foi verificado! Bem-vindo(a) ao servidor. 🎉\n\n' +
-              'Opcional: conecte sua conta ao bot no botão abaixo para poder ser readicionado automaticamente pela staff.'
-          ),
-        ],
-        components: [
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setLabel('Conectar conta').setStyle(ButtonStyle.Link).setURL(createOAuthUrl(interaction.guild.id))
-          ),
-        ],
-      });
-    }
-    return respond(interaction, { embeds: [successEmbed('Você foi verificado! Bem-vindo(a) ao servidor. 🎉')] });
-  } catch (err) {
-    console.error('[verify] Falha ao adicionar cargo:', err.message);
-    return respond(interaction, {
-      embeds: [errorEmbed('Não consegui te dar o cargo. Avise a staff (o cargo do bot precisa estar acima do cargo de verificado).')],
-    });
-  }
-}
 
 /** Toggle do self-role via botão (customId: rr_<id>). */
 async function handleRoleButton(interaction, entryId) {
@@ -139,9 +107,16 @@ module.exports = {
         await handleEntryButton(interaction, customId.slice('giveaway_enter_'.length));
         return;
       }
-      if (customId === 'verify_button') {
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-        await handleVerifyButton(interaction);
+      // Painel do /setup-verify: selects, modais e publicação — próprio ack.
+      // Prefixo distinto de `verify_` para não capturar o painel público.
+      if (customId.startsWith('vsetup_')) {
+        await routeVerifySetup(interaction);
+        return;
+      }
+      // Verificação por captcha: o botão "Inserir código" abre um modal, então o
+      // handler cuida do próprio ack.
+      if (customId.startsWith('verify_')) {
+        await routeVerifyInteraction(interaction);
         return;
       }
       if (customId.startsWith('rr_')) {

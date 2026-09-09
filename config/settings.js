@@ -16,4 +16,20 @@ module.exports = {
     // máximo de tickets abertos simultâneos por usuário
     maxOpenPerUser: 3,
   },
+  verify: {
+    // caracteres do código do captcha
+    codeLength: 6,
+    // tentativas por desafio antes de cair no cooldown
+    maxAttempts: 3,
+    // validade do desafio: depois disso é preciso gerar outro
+    challengeTtlMs: 3 * 60 * 1000,
+    // espera após esgotar as tentativas
+    cooldownMs: 5 * 60 * 1000,
+    // dimensões do PNG do captcha
+    imageWidth: 420,
+    imageHeight: 140,
+    // ruído da imagem
+    noiseLines: 4,
+    noiseDots: 180,
+  },
 };

@@ -74,7 +74,7 @@ São 28 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 | `/setup-welcome` | Painel das mensagens de boas-vindas | Administrador |
 | `/setup-logs canal` | Define o canal de logs do servidor | Administrador |
 | `/setup-ticket-logs canal` | Canal de logs exclusivo dos tickets (transcripts e avaliações) | Administrador |
-| `/setup-verify canal cargo` | Configura o sistema de verificação de entrada | Administrador |
+| `/setup-verify` | Painel da verificação por captcha: canal, cargo e aparência do embed e do botão | Administrador |
 | `/pull-user usuario` | Readiciona ao servidor quem conectou a conta via OAuth | Administrador |
 | `/bot-status` | Painel do status e da atividade do bot (global) | Administrador |
 | `/config-emojis` | Painel para trocar os emojis usados pelo bot | Administrador |
@@ -137,9 +137,59 @@ O status é aplicado de forma redundante porque o gateway o zera em cada reconex
 
 > Reler o status real depende da intent privilegiada `GuildPresences`, que este bot não usa. Sem ela o status é aplicado sem conferência (o que basta, já que ele também vai no IDENTIFY).
 
-## Verificação com OAuth (opcional)
+## Verificação por captcha
 
-O botão **Verificar** dá o cargo configurado em `/setup-verify`. Se você preencher `CLIENT_SECRET`, `OAUTH_REDIRECT_URI` e `OAUTH_PORT` no `.env` (e cadastrar a Redirect URL na aba OAuth2 do Developer Portal), após verificar o usuário também recebe um botão opcional **Conectar conta** (escopos `identify guilds.join`, com consentimento explícito na tela oficial do Discord). Usuários conectados podem ser readicionados ao servidor pela staff com `/pull-user`.
+Clicar no botão **não libera nada** — clique é a única coisa que um bot de auto-join faz bem. O que solta o cargo é resolver um desafio:
+
+1. O membro clica no botão do painel publicado por `/setup-verify` (**Verificar**, por padrão — nome, cor e emoji são configuráveis).
+2. O bot responde **só para ele** (efêmero) com um PNG contendo um código de 6 caracteres, distorcido: cada letra tem rotação, tamanho e cor próprios, e a imagem inteira passa por uma onda em nível de pixel, sobre ruído de linhas e pontos. O código **nunca aparece em texto** na mensagem, então não há o que copiar — só o que ler.
+3. Em **Inserir código** abre um modal para digitar a resposta (não diferencia maiúsculas de minúsculas e ignora espaços). Se a imagem ficou ruim, **Gerar outra imagem** troca o desafio.
+4. Acertando, o cargo é aplicado e a verificação vai para o canal de logs com as tentativas usadas.
+
+Limites, todos em `config/settings.js` → `verify`:
+
+| Chave | Padrão | O que faz |
+|---|---|---|
+| `codeLength` | 6 | Caracteres do código |
+| `maxAttempts` | 3 | Tentativas por pessoa antes do cooldown |
+| `challengeTtlMs` | 3 min | Validade do desafio |
+| `cooldownMs` | 5 min | Espera após esgotar as tentativas |
+| `imageWidth` / `imageHeight` | 420 × 140 | Tamanho do PNG |
+| `noiseLines` / `noiseDots` | 4 / 180 | Ruído da imagem |
+
+Gerar outra imagem **não zera o contador de tentativas** — senão o limite não limitaria nada. Esgotando as tentativas, o desafio é descartado e o cooldown entra em vigor; o bloqueio também é registrado nos logs. Desafios e cooldowns vivem em memória, então um reinício do bot os descarta (a pessoa só precisa clicar no painel de novo).
+
+O alfabeto exclui caracteres ambíguos na tela (`0/O`, `1/I/L`, `2/Z`, `5/S`, `8/B`, `6/G`) e o código vem do CSPRNG do Node, não de `Math.random`.
+
+### Painel do `/setup-verify`
+
+`/setup-verify` não pede parâmetros: abre um painel só para você, com o **preview do painel público logo abaixo**, exatamente como o membro vai ver. Tudo é salvo na hora (JSON em `guild_config.verify_panel`), então dá para fechar e voltar depois sem perder nada — só o envio ao canal exige o clique em **Publicar**.
+
+Dá para configurar:
+
+| Onde | O que muda |
+|---|---|
+| Menu de canal | Canal onde o painel é publicado (o bot confere as permissões antes de aceitar) |
+| Menu de cargo | Cargo entregue a quem passa no captcha (recusa `@everyone`, cargos de integração e cargos acima do bot) |
+| Menu de cor do embed | 23 cores nomeadas ou **Hex personalizado…** para digitar algo como `#5865F2` |
+| Menu de cor do botão | Verde, Azul, Cinza ou Vermelho — são as únicas quatro que o Discord tem |
+| **Textos** | Título, descrição (com `\n` para quebra de linha) e rodapé |
+| **Imagens** | Imagem grande e miniatura do canto, por URL |
+| **Botão** | Texto do botão, e o emoji: um emoji qualquer, `nenhum` para ficar sem, ou vazio para usar o do `/config-emojis` |
+
+Campo de texto vazio volta ao padrão (título e rodapé somem; a descrição volta ao texto original). Emoji inválido ou cor não reconhecida são **recusados com aviso**, mantendo o valor anterior — um emoji quebrado derrubaria o envio da mensagem inteira.
+
+Republicar no mesmo canal **edita a mensagem já publicada** em vez de empilhar painéis, então o link que a staff divulgou continua valendo. Se você trocar de canal, o painel antigo continua funcionando onde está e o bot avisa — apagar mensagem por conta própria não é papel de um "publicar".
+
+> Aqui as imagens entram só por **URL**, diferente do `/embed`, que aceita anexo. Anexo do Discord ganha uma URL assinada que expira, e a configuração salva apontaria para um link morto na primeira reinicialização.
+
+> As opções `canal` e `cargo` continuam existindo como atalho opcional (`/setup-verify canal:#verificar cargo:@Membro`), mas passam pelas mesmas validações e podem ser trocadas no painel depois. Como elas deixaram de ser obrigatórias, rode `npm run deploy` para o Discord atualizar o comando.
+
+> **Requisito de host:** o desenho usa `@napi-rs/canvas` (binário pré-compilado, sem toolchain) e precisa de **alguma fonte instalada no sistema**. O bot confere isso no boot e o `/setup-verify` se recusa a ativar a verificação sem fonte, com a instrução de instalar (em containers Debian/Ubuntu: `apt-get install fonts-dejavu-core`).
+
+### Conexão de conta com OAuth (opcional)
+
+Se você preencher `CLIENT_SECRET`, `OAUTH_REDIRECT_URI` e `OAUTH_PORT` no `.env` (e cadastrar a Redirect URL na aba OAuth2 do Developer Portal), após verificar o usuário também recebe um botão opcional **Conectar conta** (escopos `identify guilds.join`, com consentimento explícito na tela oficial do Discord). Usuários conectados podem ser readicionados ao servidor pela staff com `/pull-user`.
 
 > O servidor de callback roda em `http://localhost:PORTA/callback`. Para uso real, exponha com um domínio/HTTPS (ex: reverse proxy) e atualize a Redirect URL.
 
@@ -151,9 +201,11 @@ O botão **Verificar** dá o cargo configurado em `/setup-verify`. Se você pree
 
 - `index.js` — entrypoint (monta o client já com a presença salva) · `deploy-commands.js` — registro de slash commands
 - `database/db.js` — schema SQLite e helpers de config
-- `handlers/` — loaders e a lógica dos painéis: tickets, giveaways, embed, boas-vindas, status e emojis
+- `handlers/` — loaders e a lógica dos painéis: tickets, giveaways, embed, verificação, boas-vindas, status e emojis
 - `events/` — ready, interactionCreate (roteia botões/selects por prefixo do customId), member add/remove, logs
 - `commands/<módulo>/` — um arquivo por comando
 - `utils/emojis.js` — registro central dos emojis · `utils/emojiSource.js` — download validado do `/emoji-add`
 - `utils/presence.js` — presença salva e normalizada · `utils/presenceKeeper.js` — garante o status após reconexões
+- `utils/captcha.js` — geração do PNG do captcha · `utils/verifyChallenges.js` — desafios e cooldowns em memória
+- `utils/verifyPanelConfig.js` — aparência salva do painel de verificação (embed + botão)
 - `oauth/server.js` — callback OAuth2 (verify avançado)

@@ -31,6 +31,16 @@ const client = new Client({
 loadCommands(client);
 loadEvents(client);
 
+// O captcha da verificação depende de uma fonte do sistema. Avisar no boot evita
+// descobrir isso só quando alguém tenta se verificar.
+const { checkCaptchaSupport } = require('./utils/captcha');
+const captchaSupport = checkCaptchaSupport();
+if (captchaSupport.ok) {
+  console.log(`[verify] Captcha pronto (fonte: ${captchaSupport.family}).`);
+} else {
+  console.warn(`[verify] Captcha indisponível — ${captchaSupport.reason}`);
+}
+
 const { startOAuthServer, isOAuthEnabled } = require('./oauth/server');
 if (isOAuthEnabled()) {
   startOAuthServer(client);
