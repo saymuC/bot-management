@@ -2,13 +2,21 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, Partials } = require('discord.js');
 const { loadCommands } = require('./handlers/loadCommands');
 const { loadEvents } = require('./handlers/loadEvents');
+const { getSavedPresence, buildPresenceData, describePresence } = require('./utils/presence');
 
 if (!process.env.DISCORD_TOKEN) {
   console.error('DISCORD_TOKEN não definido. Copie .env.example para .env e preencha.');
   process.exit(1);
 }
 
+// A presença vai já no IDENTIFY: assim o bot nasce com o status certo, sem
+// depender de um OP 3 enviado depois do READY (que o Discord às vezes descarta).
+// Vale para toda reconexão que reidentifica, não só para o primeiro login.
+const savedPresence = getSavedPresence();
+console.log(`[presence] Conectando com: ${describePresence(savedPresence)}`);
+
 const client = new Client({
+  presence: buildPresenceData(savedPresence),
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,

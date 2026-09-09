@@ -109,13 +109,16 @@ function savePresence(presence) {
 }
 
 /**
- * Aplica a presença no client.
+ * Monta o payload que o gateway espera.
  *
  * No tipo `Custom` o Discord ignora o `name` e exibe o `state`, então caímos
  * para o nome quando a linha extra está vazia. `Streaming` só mostra o título
  * como link quando acompanhado de uma URL de Twitch/YouTube.
+ *
+ * Fica separado do `applyPresence` porque o mesmo objeto vai no IDENTIFY
+ * (opções do Client), e não só no OP 3 enviado depois do ready.
  */
-function applyPresence(client, presence) {
+function buildPresenceData(presence) {
   const config = normalizePresence(presence);
   const meta = ACTIVITIES[config.activity];
   const activities = [];
@@ -131,7 +134,21 @@ function applyPresence(client, presence) {
     activities.push(activity);
   }
 
-  client.user.setPresence({ status: config.status, activities });
+  return { status: config.status, activities };
+}
+
+/**
+ * Aplica a presença no client.
+ *
+ * @returns {ReturnType<typeof normalizePresence>|null} null quando o client
+ *   ainda não tem sessão (nada foi enviado).
+ */
+function applyPresence(client, presence) {
+  const config = normalizePresence(presence);
+  // Antes do READY não existe `client.user`; enviar aqui daria TypeError e
+  // derrubaria quem chamou (era o caso do reassert em reconexão).
+  if (!client.user) return null;
+  client.user.setPresence(buildPresenceData(config));
   return config;
 }
 
@@ -179,6 +196,7 @@ module.exports = {
   normalizePresence,
   getSavedPresence,
   savePresence,
+  buildPresenceData,
   applyPresence,
   describePresence,
   presenceWarnings,

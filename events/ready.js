@@ -1,6 +1,6 @@
 const { Events } = require('discord.js');
 const { startGiveawaySweeper } = require('../handlers/giveawayHandler');
-const { getSavedPresence, applyPresence, describePresence } = require('../utils/presence');
+const { startPresenceKeeper } = require('../utils/presenceKeeper');
 
 module.exports = {
   name: Events.ClientReady,
@@ -8,10 +8,9 @@ module.exports = {
   execute(client) {
     console.log(`✅ Logado como ${client.user.tag} em ${client.guilds.cache.size} servidor(es).`);
 
-    // O gateway zera a presença a cada conexão, então reaplicamos o que o
-    // /bot-status gravou (ou o padrão, na primeira execução).
-    const presence = applyPresence(client, getSavedPresence());
-    console.log(`[presence] ${describePresence(presence)}`);
+    // O gateway zera a presença a cada conexão (inclusive nas reconexões
+    // automáticas), então quem cuida disso é o guardião, não uma chamada única.
+    startPresenceKeeper(client);
 
     startGiveawaySweeper(client);
   },

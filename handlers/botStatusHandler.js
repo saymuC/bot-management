@@ -28,10 +28,10 @@ const {
   normalizePresence,
   getSavedPresence,
   savePresence,
-  applyPresence,
   describePresence,
   presenceWarnings,
 } = require('../utils/presence');
+const { setDesiredPresence } = require('../utils/presenceKeeper');
 
 const PREFIX = 'bstatus_';
 /** Tempo que um rascunho abandonado fica na memória. */
@@ -274,7 +274,9 @@ async function handleApply(interaction) {
   const draft = getDraft(interaction.user.id);
 
   try {
-    const applied = applyPresence(interaction.client, draft);
+    // Vai pelo guardião para que o valor novo seja o reafirmado nas reconexões.
+    const applied = setDesiredPresence(interaction.client, draft);
+    if (!applied) return redraw(interaction, '⚠️ Ainda estou me conectando ao Discord. Tente de novo em alguns segundos.');
     savePresence(applied);
     clearDraft(interaction.user.id);
     console.log(`[presence] ${interaction.user.tag} alterou para: ${describePresence(applied)}`);
