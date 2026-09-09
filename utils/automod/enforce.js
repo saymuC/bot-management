@@ -13,19 +13,19 @@ const { baseEmbed } = require('../embeds');
 const { emoji } = require('../emojis');
 const { colors } = require('../../config/settings');
 const { formatDuration } = require('../time');
-const { ACTIONS } = require('../../config/automodRules');
+const { ACTIONS, ACTION_SEVERITY } = require('../../config/automodRules');
 const { MAX_MUTE_MS } = require('./config');
-const { recordInfraction, activePoints, ladderStep } = require('./infractions');
+const { recordInfraction, activePoints, crossedStep } = require('./infractions');
 const { forgetUser } = require('./tracker');
 
-/** Um aviso por usuário+canal nesta janela: num flood de 20 mensagens, 1 aviso. */
+/** Um aviso por usuário e escopo nesta janela: num flood de 20 mensagens, 1 aviso. */
 const NOTICE_COOLDOWN_MS = 10000;
 
 const insertWarn = db.prepare(
   'INSERT INTO warns (guild_id, user_id, moderator_id, reason) VALUES (?, ?, ?, ?)'
 );
 
-/** `guildId:userId:channelId` -> timestamp do último aviso. */
+/** `guildId:userId:escopo` -> timestamp do último aviso. */
 const noticeCooldown = new Map();
 
 /** Limpeza do Map de cooldown, para ele não crescer indefinidamente. */
@@ -53,8 +53,18 @@ async function automodLog(guild, config, title, description, color, fields) {
     .catch((err) => console.error(`[automod] Falha ao logar em ${config.logChannelId}:`, err.message));
 }
 
-function canNotify(guildId, userId, channelId, now = Date.now()) {
-  const key = `${guildId}:${userId}:${channelId}`;
+/**
+ * Já cabe outro aviso a este membro neste escopo?
+ *
+ * O escopo é o canal para o aviso público e a string `dm` para a DM. Separados
+ * porque um flood espalhado por cinco canais deve render cinco recados públicos
+ * (um por plateia) mas **uma** DM: a DM tem uma plateia só, e cinco cópias nela
+ * seriam o bot floodando o infrator.
+ *
+ * @param {string} scope id do canal ou `'dm'`
+ */
+function canNotify(guildId, userId, scope, now = Date.now()) {
+  const key = `${guildId}:${userId}:${scope}`;
   if (now - (noticeCooldown.get(key) ?? 0) < NOTICE_COOLDOWN_MS) return false;
   noticeCooldown.set(key, now);
   return true;
@@ -77,17 +87,22 @@ async function deleteMessage(message, rule) {
  * O aviso no canal **não se apaga sozinho** a menos que a regra tenha um prazo
  * configurado (`noticeTtlMs`). O padrão é ficar: uma mensagem que desaparece sem
  * ninguém ter pedido não dá para reler nem para conferir depois.
+ *
+ * O cooldown vale para os dois alcances. Ele existe justamente por causa do
+ * flood — e as regras de flood avisam por DM — então deixar a DM de fora dele
+ * seria tirar a trava exatamente de onde ela é necessária.
  */
 async function notify(message, rule, text) {
   if (rule.notify === 'none') return;
+
+  const scope = rule.notify === 'dm' ? 'dm' : message.channel.id;
+  if (!canNotify(message.guild.id, message.author.id, scope)) return;
 
   if (rule.notify === 'dm') {
     // DM fechada é comum e não é problema do bot.
     await message.author.send({ content: `**${message.guild.name}** · ${text}` }).catch(() => {});
     return;
   }
-
-  if (!canNotify(message.guild.id, message.author.id, message.channel.id)) return;
 
   const sent = await message.channel
     .send({ content: `${message.author}, ${text}`, allowedMentions: { users: [message.author.id] } })
@@ -135,11 +150,42 @@ async function applyAction(member, action, muteMs, reason) {
   return { ok: false, detail: `ação desconhecida: ${action}` };
 }
 
-/** Texto curto do que aconteceu, para o aviso ao infrator. */
-function noticeText(violation, results) {
+/**
+ * Texto curto do que aconteceu, para o aviso ao infrator.
+ *
+ * O `deleted` é o resultado real da remoção, não a intenção da regra: dizer "sua
+ * mensagem foi removida" com a mensagem ainda no canal — porque a regra não pede
+ * remoção, ou porque o bot não conseguiu — deixa quem leu procurando o que não
+ * saiu do lugar e faz o aviso parecer errado sobre tudo o mais que ele diz.
+ *
+ * @param {boolean} deleted se a mensagem realmente saiu
+ */
+function noticeText(violation, results, deleted) {
   const applied = results.filter((r) => r.ok && r.detail).map((r) => r.detail);
-  const base = `sua mensagem foi removida (${violation.label.toLowerCase()}).`;
+  const motive = violation.label.toLowerCase();
+  const base = deleted ? `sua mensagem foi removida (${motive}).` : `sua mensagem infringe as regras (${motive}).`;
   return applied.length ? `${base} Você foi ${applied.join(' e ')}.` : base;
+}
+
+/**
+ * Das duas ações que um evento pode gerar — a imediata da regra e a do degrau
+ * cruzado — devolve a única que será aplicada: a mais grave.
+ *
+ * Empate em `mute` fica com o timeout mais longo, pelo mesmo motivo: aplicar os
+ * dois só sobrescreveria um pelo outro, e o membro que chegou num degrau da
+ * escada não deveria sair dele com menos tempo do que já tinha.
+ */
+function pickAction(immediate, ladder) {
+  if (!ladder || ladder.action === 'none') return immediate;
+  if (!immediate || immediate.action === 'none') return ladder;
+
+  const byLadder = ACTION_SEVERITY[ladder.action] ?? 0;
+  const byRule = ACTION_SEVERITY[immediate.action] ?? 0;
+
+  if (byLadder !== byRule) return byLadder > byRule ? ladder : immediate;
+  if (immediate.action !== 'mute') return ladder;
+
+  return (ladder.muteMs ?? 0) >= (immediate.muteMs ?? 0) ? ladder : immediate;
 }
 
 /**
@@ -156,10 +202,9 @@ async function enforce(message, violation, config) {
 
   const deleted = await deleteMessage(message, rule);
 
-  const immediate = await applyAction(member, rule.action, rule.muteMs, reason);
-
-  // A infração é gravada mesmo quando a ação falha: o registro é o histórico do
-  // que o membro fez, não do que o bot conseguiu fazer.
+  // Gravar antes de punir: a decisão de punição depende do total **já com** esta
+  // infração somada, e o registro é o histórico do que o membro fez, não do que o
+  // bot conseguiu fazer — ele fica mesmo que a punição falhe.
   recordInfraction({
     guildId: message.guild.id,
     userId: member.id,
@@ -171,26 +216,32 @@ async function enforce(message, violation, config) {
     action: rule.action,
   });
 
-  // Escada: só entra em cena se a regra dá pontos.
-  const results = [immediate];
+  // Escada: só entra em cena se a regra dá pontos e o evento cruzou um degrau.
   let step = null;
   let total = 0;
 
   if (rule.points > 0 && config.ladder.length) {
     total = activePoints(message.guild.id, member.id, config.pointsExpireHours);
-    step = ladderStep(config.ladder, total);
-
-    // Ação da escada igual à imediata seria punir duas vezes pelo mesmo evento.
-    if (step && step.action !== rule.action) {
-      results.push(await applyAction(member, step.action, step.muteMs, `AutoMod: ${total} pontos de infração`));
-    }
+    step = crossedStep(config.ladder, total - rule.points, total);
   }
 
-  await notify(message, rule, noticeText(violation, results));
+  // Uma punição por evento: a mais grave entre a da regra e a do degrau.
+  const chosen = pickAction({ action: rule.action, muteMs: rule.muteMs }, step);
+  const fromLadder = chosen === step;
+  const applied = await applyAction(
+    member,
+    chosen.action,
+    chosen.muteMs,
+    fromLadder ? `AutoMod: ${total} pontos de infração` : reason
+  );
+
+  const results = [applied];
+
+  await notify(message, rule, noticeText(violation, results, deleted));
 
   // Esquece o histórico recente: sem isso a próxima mensagem do mesmo flood
   // dispararia a mesma regra outra vez, com pontos novos.
-  if (rule.action !== 'none' || step) forgetUser(message.guild.id, member.id);
+  if (chosen.action !== 'none') forgetUser(message.guild.id, member.id);
 
   const failures = results.filter((r) => !r.ok && r.detail);
   const fields = [
@@ -201,9 +252,15 @@ async function enforce(message, violation, config) {
       name: 'Consequências',
       value: [
         deleted ? 'mensagem apagada' : rule.deleteMessage ? 'não conseguiu apagar' : 'mensagem mantida',
-        immediate.ok && immediate.detail ? immediate.detail : null,
+        applied.ok && applied.detail
+          ? `${applied.detail} ${fromLadder ? `(escada, degrau de ${step.points} pontos)` : '(ação da regra)'}`
+          : null,
         rule.points > 0 ? `+${rule.points} ponto(s)${total ? ` (total: ${total})` : ''}` : null,
-        step ? `escada em ${step.points} pontos: ${ACTIONS[step.action]?.label ?? step.action}` : null,
+        // Sem isto, "a regra manda advertir e o log não fala em advertência"
+        // pareceria falha do bot em vez da escolha de não punir duas vezes.
+        fromLadder && rule.action !== 'none' && rule.action !== chosen.action
+          ? `ação da regra (${ACTIONS[rule.action]?.label ?? rule.action}) absorvida pela escada`
+          : null,
         ...failures.map((f) => `⚠️ ${f.detail}`),
       ]
         .filter(Boolean)
@@ -225,7 +282,7 @@ async function enforce(message, violation, config) {
     fields
   );
 
-  return { deleted, immediate, step, total };
+  return { deleted, applied, chosen, fromLadder, step, total };
 }
 
 module.exports = {
@@ -233,6 +290,7 @@ module.exports = {
   canNotify,
   automodLog,
   applyAction,
+  pickAction,
   noticeText,
   enforce,
 };

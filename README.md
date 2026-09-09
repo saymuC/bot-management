@@ -144,9 +144,13 @@ Os pontos alimentam a **escada**, configurada no botão `[Escada]` com um degrau
 12 ban
 ```
 
-Aplica-se o degrau mais alto que os pontos cruzarem. Pontos vencem — 7 dias por padrão, ajustável no mesmo modal — e vencer significa **sair da soma, não ser apagado**: o `/infractions` continua mostrando a linha marcada com ⏳.
+O degrau só vale **na infração que o cruza**. Nesta escada, quem vai de 6 para 7 pontos não cruzou nada — o degrau de 5 ele já pagou — e não é silenciado de novo; quem vai de 2 para 7 cruza 3 e 5 de uma vez e leva só o mais alto, o mute de 1 h.
 
-`/infractions @usuario` mostra pontos válidos, total de infrações, quando vencem, o degrau atual, o próximo degrau e as 10 últimas linhas.
+**Uma punição por evento.** Quando a ação imediata da regra e o degrau caem na mesma mensagem, aplica-se **a mais grave** das duas (`nenhuma` < `advertir` < `silenciar` < `expulsar` < `banir`); empatando em `silenciar`, vale o timeout mais longo. Advertir *e* silenciar pela mesma mensagem seria punir duas vezes pelo mesmo fato. A consequência prática: quando a escada absorve um `Advertir`, **nenhum warn é gravado**, então aquele evento não aparece no `/warnings` — ele aparece no `/infractions`, e o log do AutoMod diz que a ação da regra foi absorvida.
+
+Pontos vencem — 7 dias por padrão, ajustável no mesmo modal — e vencer significa **sair da soma, não ser apagado**: o `/infractions` continua mostrando a linha marcada com ⏳. A soma é feita no banco, sem teto de linhas: um reincidente com 250 infrações soma 250, não 200.
+
+`/infractions @usuario` mostra pontos válidos, total de infrações, quando vencem, o degrau atual (o mais alto alcançado, não o último cruzado), o próximo degrau e as 10 últimas linhas.
 
 ### Perdoar
 
@@ -173,7 +177,9 @@ Duas escolhas independentes, por regra, nos dois selects de baixo do painel:
 
 **Quanto tempo fica** — `Não apagar` (padrão), ou um prazo de 5 s a 15 min. **O aviso no canal não se apaga sozinho** a menos que você escolha um prazo: uma mensagem que desaparece sem ninguém ter pedido não dá para reler nem para conferir depois. O select fica desabilitado quando o aviso vai para a DM ou está desligado — a DM é do usuário e o bot não a apaga.
 
-Num flood de 20 mensagens o bot apaga as 20 e **avisa uma vez** (cooldown de aviso por usuário e canal) — sem isso o remédio viraria o spam. Todo aviso vai com `allowedMentions` restrito. Regras de flood vêm com o aviso na DM por padrão, justamente para não somar barulho ao barulho.
+O texto do aviso diz o que **de fato** aconteceu: se a regra não apaga a mensagem, ou se o bot não conseguiu apagá-la, o aviso não afirma que ela foi removida — ele diz que a mensagem infringe as regras. O mesmo vale para a punição: uma ação que falhou não vira promessa no aviso.
+
+Num flood de 20 mensagens o bot apaga as 20 e **avisa uma vez** (cooldown de 10 s por usuário e escopo) — sem isso o remédio viraria o spam. O escopo é o canal para o aviso público e um escopo único para a DM: um flood espalhado por cinco canais rende cinco recados públicos, um por plateia, mas **uma** DM. Regras de flood vêm com o aviso na DM por padrão, justamente para não somar barulho ao barulho — e é por isso que o cooldown vale ali também. Todo aviso vai com `allowedMentions` restrito.
 
 ### Isenções
 

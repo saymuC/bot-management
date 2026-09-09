@@ -10,7 +10,6 @@
  */
 
 const { db } = require('../../database/db');
-const { parseSqlDate } = require('../time');
 
 /** Quanto do texto original fica guardado junto da infração. */
 const MAX_EXCERPT = 300;
@@ -33,6 +32,30 @@ const countStmt = db.prepare(
 );
 
 const clearStmt = db.prepare('DELETE FROM automod_infractions WHERE guild_id = ? AND user_id = ?');
+
+/**
+ * Soma no banco, não em JS: carregar as linhas para somar impunha um teto (eram
+ * 200) que fazia a pontuação de um reincidente **cair** silenciosamente ao passar
+ * dele. `COALESCE` porque `SUM` de nada é `NULL`.
+ *
+ * `created_at IS NULL OR created_at >= ?` mantém o critério antigo de contar o
+ * ponto com data ilegível: descartar seria premiar um dado corrompido.
+ */
+const sumAllStmt = db.prepare(
+  `SELECT COALESCE(SUM(points), 0) AS total FROM automod_infractions
+   WHERE guild_id = ? AND user_id = ?`
+);
+
+const sumActiveStmt = db.prepare(
+  `SELECT COALESCE(SUM(points), 0) AS total FROM automod_infractions
+   WHERE guild_id = ? AND user_id = ? AND (created_at IS NULL OR created_at >= ?)`
+);
+
+/**
+ * Timestamp no formato exato que o SQLite grava (`CURRENT_TIMESTAMP`, em UTC),
+ * para a comparação de texto do `>=` bater com a ordem cronológica.
+ */
+const toSqlDate = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
 
 /**
  * Registra uma infração.
@@ -62,47 +85,61 @@ const countInfractions = (guildId, userId) => countStmt.get(guildId, userId).tot
 const clearInfractions = (guildId, userId) => clearStmt.run(guildId, userId).changes;
 
 /**
- * Soma dos pontos ainda válidos.
- *
- * A janela é calculada em JS em vez de no SQL para não depender do fuso do
- * SQLite: `parseSqlDate` já trata o timestamp como UTC, que é como o banco grava.
+ * Soma dos pontos ainda válidos. Conta **todas** as infrações do membro, sem teto.
  *
  * @param {number} expireHours 0 = pontos nunca vencem
  */
 function activePoints(guildId, userId, expireHours, now = Date.now()) {
-  const rows = listStmt.all(guildId, userId, 200);
-  const cutoff = expireHours > 0 ? now - expireHours * 3600 * 1000 : null;
+  if (!(expireHours > 0)) return sumAllStmt.get(guildId, userId).total;
 
-  return rows.reduce((sum, row) => {
-    if (cutoff !== null) {
-      const at = parseSqlDate(row.created_at)?.getTime();
-      // Sem data legível, o ponto conta: descartar seria premiar um dado corrompido.
-      if (at != null && at < cutoff) return sum;
-    }
-    return sum + row.points;
-  }, 0);
+  const cutoff = toSqlDate(now - expireHours * 3600 * 1000);
+  return sumActiveStmt.get(guildId, userId, cutoff).total;
 }
 
 /**
- * Degrau mais alto cruzado pela pontuação.
+ * Degrau em que a pontuação **está** — o mais alto já alcançado.
  *
- * Só o mais alto é aplicado: com 8 pontos numa escada 3/5/8 o membro leva o
- * degrau de 8, não os três de uma vez.
+ * Serve para exibição (`/infractions` mostra "degrau atual"). Para decidir se há
+ * punição a aplicar, use `crossedStep`: este aqui devolve o mesmo degrau enquanto
+ * os pontos ficam entre dois limiares, e aplicá-lo a cada infração repetiria a
+ * punição sem o membro ter avançado nada.
  *
  * @param {Array<{ points: number, action: string, muteMs?: number }>} ladder já ordenada
  * @returns {{ points: number, action: string, muteMs?: number }|null}
  */
 function ladderStep(ladder, points) {
-  const crossed = (ladder ?? []).filter((step) => points >= step.points);
+  const reached = (ladder ?? []).filter((step) => points >= step.points);
+  return reached.length ? reached[reached.length - 1] : null;
+}
+
+/**
+ * Degrau **cruzado agora**, ou null se a infração não passou por limiar nenhum.
+ *
+ * A diferença importa: numa escada 3/5/8/12, um membro que vai de 6 para 7 pontos
+ * não cruzou nada — o degrau de 5 ele já pagou. Sem esta distinção, cada nova
+ * infração reaplicava o mesmo mute de 1h indefinidamente.
+ *
+ * Quando um único evento passa por mais de um limiar (2 → 7 cruza 3 e 5), vale o
+ * mais alto: é a mesma lógica de "só o mais alto é aplicado" de antes.
+ *
+ * @param {number} before pontos antes desta infração
+ * @param {number} after pontos depois
+ */
+function crossedStep(ladder, before, after) {
+  if (!(after > before)) return null;
+
+  const crossed = (ladder ?? []).filter((step) => step.points > before && step.points <= after);
   return crossed.length ? crossed[crossed.length - 1] : null;
 }
 
 module.exports = {
   MAX_EXCERPT,
+  toSqlDate,
   recordInfraction,
   listInfractions,
   countInfractions,
   clearInfractions,
   activePoints,
   ladderStep,
+  crossedStep,
 };

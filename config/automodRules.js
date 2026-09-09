@@ -34,6 +34,15 @@ const ACTIONS = Object.freeze({
 });
 
 /**
+ * Ordem de gravidade das ações, para comparar duas e escolher uma.
+ *
+ * Um único evento gera uma punição só. Quando a ação imediata da regra e o degrau
+ * da escada caem no mesmo evento, vale a mais grave — advertir **e** silenciar
+ * pela mesma mensagem é punir duas vezes pelo mesmo fato.
+ */
+const ACTION_SEVERITY = Object.freeze({ none: 0, warn: 1, mute: 2, kick: 3, ban: 4 });
+
+/**
  * Quem vê o aviso ao infrator.
  *
  * Só existem estes dois alcances porque uma mensagem comum de bot não pode ser
@@ -304,6 +313,7 @@ function ruleDefaults(key) {
 module.exports = {
   FAMILIES,
   ACTIONS,
+  ACTION_SEVERITY,
   NOTIFY_MODES,
   NOTICE_TTL_CHOICES,
   MAX_NOTICE_TTL_MS,

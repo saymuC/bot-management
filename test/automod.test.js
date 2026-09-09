@@ -50,7 +50,8 @@ const { detectors: words } = require('../utils/automod/detectors/words');
 const { detectors: flood } = require('../utils/automod/detectors/flood');
 const { detectors: links, extractDomains, extractInviteCodes, matchesDomain, linkifiable } =
   require('../utils/automod/detectors/links');
-const { ladderStep } = require('../utils/automod/infractions');
+const { ladderStep, crossedStep } = require('../utils/automod/infractions');
+const { pickAction, noticeText, canNotify, NOTICE_COOLDOWN_MS } = require('../utils/automod/enforce');
 const { parseDuration, parseLadderLine, isInert } = require('../handlers/automodSetupHandler');
 
 /** Limites de uma regra, com as sobrescritas do teste por cima. */
@@ -515,19 +516,73 @@ test('detector attachmentSpam soma os anexos da janela', () => {
 
 // ---------------------------------------------------------------------------
 
-test('ladderStep aplica só o degrau mais alto cruzado', () => {
-  const ladder = [
-    { points: 3, action: 'mute' },
-    { points: 5, action: 'mute' },
-    { points: 8, action: 'kick' },
-  ];
+const LADDER = [
+  { points: 3, action: 'mute', muteMs: 600_000 },
+  { points: 5, action: 'mute', muteMs: 3_600_000 },
+  { points: 8, action: 'kick' },
+];
 
-  assert.equal(ladderStep(ladder, 2), null);
-  assert.equal(ladderStep(ladder, 3).action, 'mute');
-  assert.equal(ladderStep(ladder, 8).action, 'kick');
-  assert.equal(ladderStep(ladder, 100).points, 8);
+test('ladderStep devolve o degrau alcançado, para exibição', () => {
+  assert.equal(ladderStep(LADDER, 2), null);
+  assert.equal(ladderStep(LADDER, 3).action, 'mute');
+  assert.equal(ladderStep(LADDER, 8).action, 'kick');
+  assert.equal(ladderStep(LADDER, 100).points, 8, 'acima do topo continua no topo');
+  assert.equal(ladderStep(LADDER, 7).points, 5, 'entre dois limiares fica no de baixo');
   assert.equal(ladderStep([], 10), null);
   assert.equal(ladderStep(undefined, 10), null);
+});
+
+test('crossedStep só acusa degrau quando a pontuação passa por um limiar', () => {
+  assert.equal(crossedStep(LADDER, 6, 7), null, '6 → 7 não cruza nada: o degrau de 5 já foi pago');
+  assert.equal(crossedStep(LADDER, 2, 3).points, 3);
+  assert.equal(crossedStep(LADDER, 2, 7).points, 5, 'dois limiares de uma vez: vale o mais alto');
+  assert.equal(crossedStep(LADDER, 0, 100).points, 8);
+  assert.equal(crossedStep(LADDER, 5, 5), null, 'sem avanço, sem degrau');
+  assert.equal(crossedStep(LADDER, 9, 4), null, 'pontuação que caiu não cruza para trás');
+  assert.equal(crossedStep([], 0, 10), null);
+  assert.equal(crossedStep(undefined, 0, 10), null);
+});
+
+test('pickAction aplica uma punição por evento: a mais grave', () => {
+  const rule = (action, muteMs) => ({ action, muteMs });
+
+  assert.equal(pickAction(rule('warn'), { points: 5, action: 'mute' }).action, 'mute', 'escada mais grave vence');
+  assert.equal(pickAction(rule('ban'), { points: 5, action: 'kick' }).action, 'ban', 'regra mais grave vence');
+  assert.equal(pickAction(rule('kick'), null).action, 'kick', 'sem degrau, vale a regra');
+  assert.equal(pickAction(rule('none'), { points: 5, action: 'warn' }).action, 'warn');
+  assert.equal(pickAction(rule('mute', 600_000), { points: 5, action: 'none' }).action, 'mute');
+
+  // Empate em mute: o timeout mais longo, para o degrau não encurtar a punição.
+  assert.equal(pickAction(rule('mute', 600_000), { points: 5, action: 'mute', muteMs: 3_600_000 }).muteMs, 3_600_000);
+  assert.equal(pickAction(rule('mute', 86_400_000), { points: 5, action: 'mute', muteMs: 600_000 }).muteMs, 86_400_000);
+});
+
+test('noticeText não afirma remoção quando nada foi removido', () => {
+  const violation = { label: 'Palavras proibidas' };
+  const muted = [{ ok: true, detail: 'silenciado por 10 minutos' }];
+
+  assert.match(noticeText(violation, [], true), /removida/);
+  assert.doesNotMatch(noticeText(violation, [], false), /removida/);
+  assert.match(noticeText(violation, [], false), /infringe as regras/);
+  assert.match(noticeText(violation, muted, false), /Você foi silenciado por 10 minutos\./);
+
+  // Falha na punição não vira promessa de punição no aviso ao infrator.
+  assert.doesNotMatch(noticeText(violation, [{ ok: false, detail: 'sem hierarquia' }], true), /Você foi/);
+});
+
+test('canNotify separa canal de DM, mas trava os dois', () => {
+  const g = 'guild-cooldown';
+  const u = 'user-cooldown';
+  const now = Date.now();
+
+  assert.equal(canNotify(g, u, 'canal-1', now), true);
+  assert.equal(canNotify(g, u, 'canal-1', now + 1), false, 'segundo aviso na mesma janela não passa');
+  assert.equal(canNotify(g, u, 'canal-2', now + 1), true, 'outro canal, outra plateia');
+
+  // A DM tem escopo próprio: um flood espalhado por canais não rende uma DM por canal.
+  assert.equal(canNotify(g, u, 'dm', now + 2), true);
+  assert.equal(canNotify(g, u, 'dm', now + 3), false, 'a DM também respeita o cooldown');
+  assert.equal(canNotify(g, u, 'dm', now + 3 + NOTICE_COOLDOWN_MS), true, 'passada a janela, libera');
 });
 
 test('parseDuration entende número solto, unidade e combinação', () => {
@@ -584,4 +639,26 @@ test('activePoints soma o que não venceu', async (t) => {
   const future = Date.now() + 8 * 24 * 3600 * 1000;
   assert.equal(activePoints(guildId, userId, 168, future), 0);
   assert.equal(countInfractions(guildId, userId), 2);
+});
+
+/**
+ * O reincidente com muito histórico: a soma antiga carregava as linhas para somar
+ * em JS e parava nas 200 primeiras, então a pontuação de quem passava disso
+ * **caía** em vez de subir. 250 linhas de 1 ponto têm de dar 250.
+ */
+test('activePoints soma sem teto de linhas', async (t) => {
+  const { recordInfraction, activePoints, clearInfractions } = require('../utils/automod/infractions');
+
+  const guildId = 'test-automod-bulk';
+  const userId = 'test-user-bulk';
+
+  clearInfractions(guildId, userId);
+  t.after(() => clearInfractions(guildId, userId));
+
+  for (let i = 0; i < 250; i += 1) {
+    recordInfraction({ guildId, userId, ruleKey: 'caps', points: 1, reason: 'teste' });
+  }
+
+  assert.equal(activePoints(guildId, userId, 168), 250);
+  assert.equal(activePoints(guildId, userId, 0), 250);
 });
