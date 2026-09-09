@@ -41,6 +41,7 @@ const { getGuildConfig, setGuildConfig } = require('../database/db');
 const { isHttpUrl } = require('../utils/media');
 const { parseEmojiInput } = require('../utils/emojis');
 const { checkCaptchaSupport } = require('../utils/captcha');
+const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
 const { POST_EMBED_PERMS_LABEL, TEXT_CHANNEL_TYPES, canPostEmbed } = require('../utils/channelPerms');
 const { buildVerifyPanel } = require('./verifyHandler');
 const {
@@ -201,18 +202,7 @@ function buildSetupPayload(guild, config, notice = '') {
 }
 
 /** Acka tolerando token morto/duplicado (mesma razão do embedHandler). */
-async function safeAck(interaction, ack) {
-  try {
-    await ack();
-    return true;
-  } catch (err) {
-    if (err.code === 10062 || err.code === 40060) {
-      console.warn(`[verify-setup] Interação ${interaction.customId} não ackável (${err.code}); ignorada.`);
-      return false;
-    }
-    throw err;
-  }
-}
+const safeAck = makeSafeAck('verify-setup');
 
 /** Grava a aparência e redesenha o painel. */
 function applyChange(interaction, config, changes, notice) {
@@ -280,7 +270,7 @@ function handleTexts(interaction, config) {
     ].map((input) => new ActionRowBuilder().addComponents(input))
   );
 
-  return interaction.showModal(modal).catch(() => {});
+  return interaction.showModal(modal).catch(swallowAckFailure('verify-setup', interaction));
 }
 
 function handleMedia(interaction, config) {
@@ -307,7 +297,7 @@ function handleMedia(interaction, config) {
     ].map((input) => new ActionRowBuilder().addComponents(input))
   );
 
-  return interaction.showModal(modal).catch(() => {});
+  return interaction.showModal(modal).catch(swallowAckFailure('verify-setup', interaction));
 }
 
 function handleButton(interaction, config) {
@@ -334,7 +324,7 @@ function handleButton(interaction, config) {
     ].map((input) => new ActionRowBuilder().addComponents(input))
   );
 
-  return interaction.showModal(modal).catch(() => {});
+  return interaction.showModal(modal).catch(swallowAckFailure('verify-setup', interaction));
 }
 
 /** Abre o modal de hex livre (opção "Hex personalizado" do seletor de cor). */
@@ -355,7 +345,7 @@ function handleHexModal(interaction, config) {
       )
     );
 
-  return interaction.showModal(modal).catch(() => {});
+  return interaction.showModal(modal).catch(swallowAckFailure('verify-setup', interaction));
 }
 
 function handleTextsSubmit(interaction, config) {

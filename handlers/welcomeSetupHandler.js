@@ -35,6 +35,7 @@ const {
   buildWelcomeMessage,
   normalizeConfig,
 } = require('../utils/welcomeConfig');
+const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
 
 const PREFIX = 'wsetup_';
 
@@ -168,18 +169,7 @@ function buildPanelPayload(config, member, notice = '') {
 }
 
 /** Acka tolerando token morto/duplicado (mesma razão do embedHandler). */
-async function safeAck(interaction, ack) {
-  try {
-    await ack();
-    return true;
-  } catch (err) {
-    if (err.code === 10062 || err.code === 40060) {
-      console.warn(`[welcome-setup] Interação ${interaction.customId} não ackável (${err.code}); ignorada.`);
-      return false;
-    }
-    throw err;
-  }
-}
+const safeAck = makeSafeAck('welcome-setup');
 
 /** Grava a alteração e redesenha o painel. */
 function applyChange(interaction, config, changes, notice) {
@@ -239,7 +229,7 @@ function handleTexts(interaction, config) {
     ].map((input) => new ActionRowBuilder().addComponents(input))
   );
 
-  return interaction.showModal(modal).catch(() => {});
+  return interaction.showModal(modal).catch(swallowAckFailure('welcome-setup', interaction));
 }
 
 function handleMedia(interaction, config) {
@@ -266,7 +256,7 @@ function handleMedia(interaction, config) {
     ].map((input) => new ActionRowBuilder().addComponents(input))
   );
 
-  return interaction.showModal(modal).catch(() => {});
+  return interaction.showModal(modal).catch(swallowAckFailure('welcome-setup', interaction));
 }
 
 function handleTextsSubmit(interaction, config) {

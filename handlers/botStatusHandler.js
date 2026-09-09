@@ -32,6 +32,7 @@ const {
   presenceWarnings,
 } = require('../utils/presence');
 const { setDesiredPresence } = require('../utils/presenceKeeper');
+const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
 
 const PREFIX = 'bstatus_';
 /** Tempo que um rascunho abandonado fica na memória. */
@@ -184,18 +185,7 @@ function buildStatusPanel(userId, notice = '') {
 }
 
 /** Acka tolerando token morto/duplicado (mesma razão do embedHandler). */
-async function safeAck(interaction, ack) {
-  try {
-    await ack();
-    return true;
-  } catch (err) {
-    if (err.code === 10062 || err.code === 40060) {
-      console.warn(`[bot-status] Interação ${interaction.customId} não ackável (${err.code}); ignorada.`);
-      return false;
-    }
-    throw err;
-  }
-}
+const safeAck = makeSafeAck('bot-status');
 
 function redraw(interaction, notice) {
   return safeAck(interaction, () => interaction.update(buildStatusPanel(interaction.user.id, notice)));
@@ -225,7 +215,7 @@ function handleTextsModal(interaction, draft) {
     ].map((input) => new ActionRowBuilder().addComponents(input))
   );
 
-  return interaction.showModal(modal).catch(() => {});
+  return interaction.showModal(modal).catch(swallowAckFailure('bot-status', interaction));
 }
 
 function handleLinkModal(interaction, draft) {
@@ -244,7 +234,7 @@ function handleLinkModal(interaction, draft) {
     )
   );
 
-  return interaction.showModal(modal).catch(() => {});
+  return interaction.showModal(modal).catch(swallowAckFailure('bot-status', interaction));
 }
 
 function handleTextsSubmit(interaction) {

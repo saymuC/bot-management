@@ -33,6 +33,7 @@ const { formatDuration } = require('../utils/time');
 const { colors, verify: verifyConfig } = require('../config/settings');
 const { isOAuthEnabled, createOAuthUrl } = require('../oauth/server');
 const { generateCode, renderCaptcha, matchesCode } = require('../utils/captcha');
+const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
 const { putChallenge, getChallenge, deleteChallenge, registerFailure, cooldownRemaining } = require('../utils/verifyChallenges');
 const {
   BUTTON_STYLES,
@@ -44,23 +45,12 @@ const {
 const PREFIX = 'verify_';
 const IMAGE_NAME = 'captcha.png';
 
-/**
- * Acka tolerando o token morto da interação (3s) ou o clique já respondido por
- * outra instância do bot. Nos dois casos o fluxo para em vez de estourar.
- * @returns {Promise<boolean>} false quando o ack falhou.
- */
-async function safeAck(interaction, ack) {
-  try {
-    await ack();
-    return true;
-  } catch (err) {
-    if (err.code === 10062 || err.code === 40060) {
-      console.warn(`[verify] Interação ${interaction.customId} não pôde ser ackada (${err.code}); ação ignorada.`);
-      return false;
-    }
-    throw err;
-  }
-}
+/** Acka tolerando token morto (3s) ou clique já respondido; false = fluxo para. */
+const safeAck = makeSafeAck('verify');
+
+/** Primeira resposta ao clique do painel, sempre visível só para quem clicou. */
+const replyEphemeral = (interaction, payload) =>
+  safeAck(interaction, () => interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }));
 
 /** Botões abaixo da imagem do captcha. */
 const challengeComponents = () => [
@@ -148,17 +138,25 @@ const renderFailureEmbed = () =>
 const expiredEmbed = () =>
   errorEmbed('Este desafio expirou. Clique no botão do painel de verificação para receber uma imagem nova.');
 
-/** Clique no painel público: abre o desafio numa resposta efêmera. */
+/**
+ * Clique no painel público: abre o desafio numa resposta efêmera.
+ *
+ * Responde direto, sem deferReply antes. O defer só compensa quando há trabalho
+ * lento antes da resposta, e aqui não há: gerar e desenhar o captcha custa ~8ms
+ * (medido), enquanto o defer custa uma ida-e-volta REST inteira. Cortá-lo deixa
+ * só um ack dentro da janela de 3s em vez de dois, reduzindo a chance do 10062
+ * justamente no caminho onde ele aparecia.
+ */
 async function handleStart(interaction) {
   const eligibility = checkEligibility(interaction);
-  if (!eligibility.ok) return interaction.editReply({ embeds: [eligibility.embed] });
+  if (!eligibility.ok) return replyEphemeral(interaction, { embeds: [eligibility.embed] });
 
   const challenge = issueChallenge(interaction.guild.id, interaction.user.id);
   if (!challenge) {
     console.error('[verify] Captcha não renderizado: nenhuma fonte disponível no host.');
-    return interaction.editReply({ embeds: [renderFailureEmbed()] });
+    return replyEphemeral(interaction, { embeds: [renderFailureEmbed()] });
   }
-  return interaction.editReply(challengePayload(challenge));
+  return replyEphemeral(interaction, challengePayload(challenge));
 }
 
 /** "Gerar outra imagem": novo código, mesmo contador de tentativas. */
@@ -198,13 +196,7 @@ function handleOpenModal(interaction) {
       )
     );
 
-  return interaction.showModal(modal).catch((err) => {
-    if (err.code === 10062) {
-      console.warn('[verify] Modal do captcha não abriu: interação expirada.');
-      return undefined;
-    }
-    throw err;
-  });
+  return interaction.showModal(modal).catch(swallowAckFailure('verify', interaction));
 }
 
 /** Concede o cargo e encerra o desafio. */
@@ -318,7 +310,7 @@ async function routeVerifyInteraction(interaction) {
   switch (interaction.customId) {
     case `${PREFIX}button`:
       // Único caminho que ainda não tem resposta aberta: vem do painel público.
-      if (!(await safeAck(interaction, () => interaction.deferReply({ flags: MessageFlags.Ephemeral })))) return undefined;
+      // Ele mesmo responde (sem defer) — ver o comentário em handleStart.
       return handleStart(interaction);
     case `${PREFIX}code`:
       return handleOpenModal(interaction);

@@ -25,6 +25,7 @@ const { resolveColor, describeColor, colorSelectOptions } = require('../utils/co
 const { getDraft, updateDraft, deleteDraft } = require('../utils/embedDrafts');
 const { classifyUrl } = require('../utils/media');
 const { POST_EMBED_PERMS_LABEL, TEXT_CHANNEL_TYPES, canPostEmbed, resolveTextChannel } = require('../utils/channelPerms');
+const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
 
 const PREFIX = 'embedp_';
 
@@ -60,26 +61,13 @@ const hasMedia = (draft) =>
   );
 
 /**
- * Acka a interação tolerando o erro 10062 ("Unknown interaction").
- *
- * Acontece quando o token da interação já expirou (3s) ou quando outra
- * instância do bot ackou o mesmo clique antes. Nos dois casos abortamos o
- * fluxo em vez de estourar: seguir adiante enviaria o embed duplicado.
+ * Acka a interação tolerando token expirado (3s) ou clique que outra instância
+ * do bot já respondeu. Nos dois casos abortamos o fluxo em vez de estourar:
+ * seguir adiante enviaria o embed duplicado.
  *
  * @returns {Promise<boolean>} false quando o ack falhou e o fluxo deve parar.
  */
-async function safeAck(interaction, ack) {
-  try {
-    await ack();
-    return true;
-  } catch (err) {
-    if (err.code === 10062 || err.code === 40060) {
-      console.warn(`[embed] Interação ${interaction.customId} não pôde ser ackada (${err.code}); ação ignorada.`);
-      return false;
-    }
-    throw err;
-  }
-}
+const safeAck = makeSafeAck('embed');
 
 /** Componentes do preview: select de canal + linha de ações. */
 function previewComponents(draft) {
@@ -261,13 +249,7 @@ function handleHexModal(interaction, draft) {
       )
     );
 
-  return interaction.showModal(modal).catch((err) => {
-    if (err.code === 10062) {
-      console.warn('[embed] Modal de cor não abriu: interação expirada.');
-      return undefined;
-    }
-    throw err;
-  });
+  return interaction.showModal(modal).catch(swallowAckFailure('embed', interaction));
 }
 
 /** Aplica o hex/nome digitado no modal de cor personalizada. */
@@ -374,13 +356,7 @@ function handleEdit(interaction, draft) {
     .setTitle('Editar embed')
     .addComponents(inputs.map((input) => new ActionRowBuilder().addComponents(input)));
 
-  return interaction.showModal(modal).catch((err) => {
-    if (err.code === 10062) {
-      console.warn('[embed] Modal de edição não abriu: interação expirada.');
-      return undefined;
-    }
-    throw err;
-  });
+  return interaction.showModal(modal).catch(swallowAckFailure('embed', interaction));
 }
 
 /**

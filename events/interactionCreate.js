@@ -11,6 +11,7 @@ const { routeVerifySetup } = require('../handlers/verifySetupHandler');
 const { db } = require('../database/db');
 const { errorEmbed, successEmbed } = require('../utils/embeds');
 const { respond } = require('../utils/interactions');
+const { isAckFailure, logAckFailure } = require('../utils/interactionAck');
 
 const reactionRoleStmt = db.prepare('SELECT * FROM reaction_roles WHERE id = ?');
 
@@ -125,11 +126,10 @@ module.exports = {
         return;
       }
     } catch (err) {
-      // 10062 (Unknown interaction) / 40060 (already acknowledged): o token da
-      // interação morreu ou outra instância do bot já respondeu ao mesmo clique.
-      // Não há canal de resposta válido — só registra e sai.
-      if (err.code === 10062 || err.code === 40060) {
-        console.warn(`[interactionCreate] Interação não respondível (${err.code}); ignorada.`);
+      // Token morto ou clique já respondido: não há canal de resposta válido,
+      // então o aviso (com a idade da interação, que aponta a causa) é o fim da linha.
+      if (isAckFailure(err)) {
+        logAckFailure('interactionCreate', interaction, err);
         return;
       }
       console.error('[interactionCreate] Erro:', err);

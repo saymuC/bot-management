@@ -37,6 +37,7 @@ const {
   isBrokenCustomEmoji,
   emoji,
 } = require('../utils/emojis');
+const { makeSafeAck } = require('../utils/interactionAck');
 
 const PREFIX = 'cfgemoji_';
 
@@ -176,18 +177,7 @@ function buildCapturePanel(guild, key) {
 }
 
 /** Acka tolerando token morto/duplicado (mesma razão dos outros painéis). */
-async function safeAck(interaction, ack) {
-  try {
-    await ack();
-    return true;
-  } catch (err) {
-    if (err.code === 10062 || err.code === 40060) {
-      console.warn(`[config-emojis] Interação ${interaction.customId} não ackável (${err.code}); ignorada.`);
-      return false;
-    }
-    throw err;
-  }
-}
+const safeAck = makeSafeAck('config-emojis');
 
 function redraw(interaction, notice) {
   return safeAck(interaction, () => interaction.update(buildEmojiPanel(interaction.guild, notice)));
