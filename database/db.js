@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS guild_config (
   verify_channel_id TEXT,
   verify_role_id TEXT,
   verify_panel TEXT,
+  automod_config TEXT,
   autorole_id TEXT,
   mute_role_id TEXT
 );
@@ -71,6 +72,21 @@ CREATE TABLE IF NOT EXISTS warns (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Infrações do AutoMod. As linhas nunca são apagadas por expiração: os pontos
+-- vencidos só ficam de fora da soma da escada, e o histórico segue consultável.
+CREATE TABLE IF NOT EXISTS automod_infractions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  rule_key TEXT NOT NULL,
+  points INTEGER NOT NULL DEFAULT 0,
+  reason TEXT,
+  excerpt TEXT,
+  channel_id TEXT,
+  action TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS giveaways (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   guild_id TEXT NOT NULL,
@@ -103,6 +119,7 @@ CREATE INDEX IF NOT EXISTS idx_tickets_guild_user ON tickets (guild_id, user_id,
 CREATE INDEX IF NOT EXISTS idx_tickets_claimed ON tickets (guild_id, claimed_by);
 CREATE INDEX IF NOT EXISTS idx_ticket_ratings_agent ON ticket_ratings (guild_id, agent_id);
 CREATE INDEX IF NOT EXISTS idx_warns_guild_user ON warns (guild_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_automod_infractions_user ON automod_infractions (guild_id, user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_reaction_roles_message ON reaction_roles (message_id);
 CREATE INDEX IF NOT EXISTS idx_giveaways_pending ON giveaways (ended, ends_at);
 `);
@@ -123,6 +140,7 @@ ensureColumn('guild_config', 'ticket_log_channel_id', 'TEXT');
 ensureColumn('guild_config', 'welcome_config', 'TEXT');
 ensureColumn('guild_config', 'emoji_config', 'TEXT');
 ensureColumn('guild_config', 'verify_panel', 'TEXT');
+ensureColumn('guild_config', 'automod_config', 'TEXT');
 ensureColumn('tickets', 'claimed_at', 'TEXT');
 ensureColumn('tickets', 'closed_by', 'TEXT');
 ensureColumn('giveaways', 'cancelled', 'INTEGER DEFAULT 0');
@@ -139,7 +157,7 @@ const upsertConfigField = (field) =>
 const CONFIG_FIELDS = [
   'welcome_channel_id', 'welcome_message', 'welcome_config', 'emoji_config', 'log_channel_id',
   'ticket_category_id', 'ticket_panel_channel_id', 'ticket_log_channel_id',
-  'verify_channel_id', 'verify_role_id', 'verify_panel', 'autorole_id', 'mute_role_id',
+  'verify_channel_id', 'verify_role_id', 'verify_panel', 'automod_config', 'autorole_id', 'mute_role_id',
 ];
 const configSetters = Object.fromEntries(CONFIG_FIELDS.map((f) => [f, upsertConfigField(f)]));
 

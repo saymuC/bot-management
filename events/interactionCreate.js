@@ -8,6 +8,7 @@ const { routeBotStatus } = require('../handlers/botStatusHandler');
 const { routeEmojiConfig } = require('../handlers/emojiConfigHandler');
 const { routeVerifyInteraction } = require('../handlers/verifyHandler');
 const { routeVerifySetup } = require('../handlers/verifySetupHandler');
+const { routeAutomodSetup } = require('../handlers/automodSetupHandler');
 const { db } = require('../database/db');
 const { errorEmbed, successEmbed } = require('../utils/embeds');
 const { respond } = require('../utils/interactions');
@@ -102,6 +103,11 @@ module.exports = {
       // responde depois pelo editReply, então cuida do próprio ack.
       if (customId.startsWith('cfgemoji_')) {
         await routeEmojiConfig(interaction);
+        return;
+      }
+      // Painel do /automod: selects, modais de limites e escada — próprio ack.
+      if (customId.startsWith('amod_')) {
+        await routeAutomodSetup(interaction);
         return;
       }
       if (customId.startsWith('giveaway_enter_')) {

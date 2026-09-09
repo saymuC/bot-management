@@ -24,8 +24,11 @@ const CATEGORIES = Object.freeze({
 });
 
 /**
- * Chaves configuráveis. A ordem aqui é a ordem do menu do painel — o Discord
- * aceita no máximo 25 opções num select, então este objeto não deve passar disso.
+ * Chaves configuráveis. A ordem aqui é a ordem do menu do painel.
+ *
+ * O painel lista **por categoria**, e não tudo de uma vez, justamente porque o
+ * Discord aceita no máximo 25 opções num select: o limite passa a valer por
+ * categoria, e não para o registro inteiro.
  */
 const REGISTRY = Object.freeze({
   success: { label: 'Sucesso', default: '✅', category: 'general', usage: 'Confirmações de ações' },
@@ -53,6 +56,9 @@ const REGISTRY = Object.freeze({
   mute: { label: 'Mute', default: '🔇', category: 'moderation', usage: 'Log de silenciamento' },
   warn: { label: 'Warn', default: '⚠️', category: 'moderation', usage: 'Log de advertência' },
   clear: { label: 'Limpeza', default: '🧹', category: 'moderation', usage: 'Log de mensagens apagadas' },
+  automod: { label: 'AutoMod', default: '🛡️', category: 'moderation', usage: 'Painel, logs e /infractions do AutoMod' },
+  automod_delete: { label: 'AutoMod apagou', default: '🚫', category: 'moderation', usage: 'Aviso de mensagem apagada pelo AutoMod' },
+  raid: { label: 'Raid', default: '🚨', category: 'moderation', usage: 'Alerta de raid e entrada suspeita' },
 
   message_edit: { label: 'Mensagem editada', default: '✏️', category: 'logs', usage: 'Log de edição' },
   message_delete: { label: 'Mensagem apagada', default: '🗑️', category: 'logs', usage: 'Log de exclusão' },
@@ -60,6 +66,30 @@ const REGISTRY = Object.freeze({
 });
 
 const KEYS = Object.freeze(Object.keys(REGISTRY));
+
+/** Chaves de uma categoria, na ordem do registro. */
+const keysOfCategory = (category) => KEYS.filter((key) => REGISTRY[key].category === category);
+
+/**
+ * Categorias que realmente têm chaves, na ordem de `CATEGORIES`.
+ *
+ * Nenhuma categoria pode passar de 25 chaves — é o teto de opções de um select
+ * do Discord, e o painel monta uma opção por chave. A checagem é na carga do
+ * módulo para o erro aparecer ao subir o bot, não ao abrir o painel.
+ */
+const CATEGORY_KEYS = Object.freeze(
+  Object.fromEntries(Object.keys(CATEGORIES).map((category) => [category, Object.freeze(keysOfCategory(category))]))
+);
+
+const overflowing = Object.entries(CATEGORY_KEYS).filter(([, keys]) => keys.length > 25);
+if (overflowing.length) {
+  throw new Error(
+    `[emojis] categorias acima de 25 chaves: ${overflowing.map(([c, k]) => `${c} (${k.length})`).join(', ')}`
+  );
+}
+
+const orphan = KEYS.filter((key) => !Object.hasOwn(CATEGORIES, REGISTRY[key].category));
+if (orphan.length) throw new Error(`[emojis] chaves com categoria inexistente: ${orphan.join(', ')}`);
 
 /** `<:nome:id>` ou `<a:nome:id>`. */
 const CUSTOM_EMOJI_RE = /^<(a?):([\w~]{2,32}):(\d{17,21})>$/;
@@ -219,6 +249,7 @@ function emoji(guild, key) {
 
 module.exports = {
   CATEGORIES,
+  CATEGORY_KEYS,
   REGISTRY,
   KEYS,
   DEFAULT_EMOJIS,

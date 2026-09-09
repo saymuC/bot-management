@@ -1,10 +1,10 @@
 # Bot Discord Multifuncional
 
-Bot de gerenciamento com tickets, moderação, sorteios, boas-vindas, logs, self-roles, verificação, emojis configuráveis e controle de status — Node.js + discord.js v14 + SQLite (better-sqlite3).
+Bot de gerenciamento com tickets, moderação, **AutoMod configurável**, sorteios, boas-vindas, logs, self-roles, verificação, emojis configuráveis e controle de status — Node.js + discord.js v14 + SQLite (better-sqlite3).
 
 ## Setup
 
-1. Crie a aplicação em https://discord.com/developers/applications, ative os **Privileged Gateway Intents**: `SERVER MEMBERS` e `MESSAGE CONTENT` (este é obrigatório: é como o `/config-emojis` lê o emoji que você manda no chat).
+1. Crie a aplicação em https://discord.com/developers/applications, ative os **Privileged Gateway Intents**: `SERVER MEMBERS` e `MESSAGE CONTENT` (este é obrigatório: é como o AutoMod lê o conteúdo das mensagens e como o `/config-emojis` lê o emoji que você manda no chat).
 2. Copie `.env.example` para `.env` e preencha `DISCORD_TOKEN`, `CLIENT_ID` e (opcional) `GUILD_ID` para testes.
 3. Registre os comandos e inicie:
 
@@ -18,9 +18,15 @@ npm start
 
 Convide o bot com o scope `bot applications.commands` e permissão de Administrador (ou as permissões mínimas: Manage Channels, Manage Roles, Ban/Kick/Moderate Members, Manage Messages, Create Invite).
 
+Os testes da lógica pura (normalização de texto, curingas, detectores, janelas de tempo, escada de pontos) rodam sem Discord e sem dependência extra:
+
+```bash
+npm test
+```
+
 ## Comandos
 
-São 28 comandos. A coluna **Permissão** é a exigência padrão do Discord para o membro ver e usar o comando (dá para sobrescrever em _Configurações do servidor → Integrações_).
+São 31 comandos. A coluna **Permissão** é a exigência padrão do Discord para o membro ver e usar o comando (dá para sobrescrever em _Configurações do servidor → Integrações_).
 
 ### Moderação
 
@@ -32,6 +38,8 @@ São 28 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 | `/warn usuario motivo` | Aplica uma advertência a um membro | Moderar membros |
 | `/warnings usuario` | Lista as advertências de um membro | Moderar membros |
 | `/clear quantidade` | Apaga mensagens do canal atual | Gerenciar mensagens |
+| `/infractions usuario limpar` | Pontos, degrau da escada e histórico de infrações do AutoMod | Moderar membros |
+| `/automod-test texto canal como` | Testa um texto contra as regras sem punir ninguém | Gerenciar servidor |
 
 ### Tickets
 
@@ -71,6 +79,7 @@ São 28 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 
 | Comando | O que faz | Permissão |
 |---|---|---|
+| `/automod` | Painel do AutoMod: filtros, limites, punições, isenções e escada | Administrador |
 | `/setup-welcome` | Painel das mensagens de boas-vindas | Administrador |
 | `/setup-logs canal` | Define o canal de logs do servidor | Administrador |
 | `/setup-ticket-logs canal` | Canal de logs exclusivo dos tickets (transcripts e avaliações) | Administrador |
@@ -81,6 +90,81 @@ São 28 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 | `/emoji-add emoji arquivo nome` | Importa um emoji de outro servidor, de um ID ou de uma imagem | Gerenciar expressões |
 
 `/nuke confirmar:true` clona o canal atual (nome, tópico, NSFW, slowmode, categoria, posição e todas as permissões), apaga o original e registra a ação nos logs. É irreversível: as mensagens não são recuperáveis.
+
+## AutoMod
+
+O motor roda **no próprio bot**, não no AutoMod nativo do Discord. Em troca de janelas de tempo, reincidência e isenções finas, ficam duas consequências: a mensagem infratora aparece por uma fração de segundo antes de ser apagada, e nada é filtrado enquanto o bot estiver offline.
+
+`/automod` abre o painel (sem parâmetros). Tudo é salvo na hora, sem botão "salvar". São três telas:
+
+- **Início** — menu com as 18 regras (✅/▫️ indicando ligada), select do canal de logs do AutoMod e os botões `[Ligar/Desligar o AutoMod] [Isenções globais] [Escada] [Isentar mods: sim/não] [Fechar]`. O resumo destaca as regras **ligadas mas sem efeito** (sem apagar, sem ação e sem pontos) — é o erro de configuração mais fácil de cometer.
+- **Regra** — select da ação imediata, select de pontos (0–10) e os botões `[Ligar/Desligar] [Limites…] [Isenções] [Voltar] [Fechar]`. "Limites…" abre um modal com os campos daquela regra; listas (palavras, domínios, extensões) vêm uma por linha.
+- **Isenções** — `RoleSelect` + `ChannelSelect` (múltiplos), tanto no escopo global quanto por regra.
+
+O AutoMod só age depois de `[Ligar o AutoMod]`: ligar uma regra sozinha não basta, o que permite configurar tudo com calma antes de valer.
+
+### As 18 regras
+
+| Regra | Família | O que barra | Limites |
+|---|---|---|---|
+| @everyone e @here | Excessos | `@everyone`/`@here` de quem não tem permissão para mencionar todos | — |
+| Menções em massa | Excessos | Muitas menções de usuário/cargo na mesma mensagem | máximo de menções |
+| CAIXA ALTA | Excessos | Maiúsculas demais | % de maiúsculas, mínimo de caracteres |
+| Excesso de emojis | Excessos | Emojis normais + personalizados | máximo de emojis |
+| Excesso de linhas | Excessos | O "muro de texto" | máximo de linhas |
+| Excesso de spoilers | Excessos | Muitos blocos `\|\|spoiler\|\|` | máximo de spoilers |
+| Zalgo | Excessos | Pilhas de acentos combinantes que esticam a linha | densidade máxima (%) |
+| Tipos de arquivo | Excessos | Anexos por extensão | extensões bloqueadas |
+| Convites do Discord | Links | `discord.gg` e afins | permitir convite deste servidor |
+| Domínios bloqueados | Links | Lista sempre barrada, mesmo se estiver na de permitidos | domínios bloqueados |
+| Links em geral | Links | Qualquer URL (lista de permitidos vazia = barra todos) | domínios permitidos |
+| Lista de palavras | Palavras | Palavras/frases proibidas | palavras, só palavra inteira, detectar disfarces |
+| Padrões com curinga | Palavras | Padrões com `*`, ex.: `ganhe*nitro*grátis` | padrões |
+| Rajada de mensagens | Flood | Muitas mensagens em pouco tempo | mensagens, janela em segundos |
+| Mensagem repetida | Flood | O mesmo texto várias vezes | repetições, janela |
+| Spam entre canais | Flood | O mesmo texto espalhado por vários canais | canais diferentes, janela |
+| Spam de anexos | Flood | Rajada de imagens, arquivos ou figurinhas | anexos, janela |
+| Entrada em massa | Raid | Muitas entradas em pouco tempo ligam um alerta temporário | entradas, janela, duração do alerta, não dar autorole |
+| Conta suspeita | Raid | Idade da conta, ausência de avatar, nome padrão do Discord | idade mínima (dias), exigir avatar, barrar nome padrão, não dar autorole |
+
+O motor avalia da regra mais barata para a mais cara e **para na primeira violação** — punir a mesma mensagem por três regras triplicaria os pontos sem o admin ter pedido isso. As duas regras de raid rodam na entrada do membro, antes do autorole e das boas-vindas, e podem suprimir os dois. O alerta de entrada em massa **não altera permissão de canal nenhuma**: ele só faz quem entrar durante o alerta receber a ação configurada.
+
+A edição de mensagem também passa pelo filtro (senão a burla seria mandar "oi" e editar para o link), mas não conta no histórico de flood — corrigir um typo três vezes não é mandar três mensagens.
+
+### Ação imediata, pontos e escada
+
+Cada regra tem, de forma independente: apagar a mensagem (sim/não), uma **ação imediata** (nenhuma, advertir, silenciar, expulsar, banir), duração do mute, quantos **pontos** vale (0–10) e para onde vai o aviso (não avisar, no canal com autodestruição, ou na DM).
+
+Os pontos alimentam a **escada**, configurada no botão `[Escada]` com um degrau por linha:
+
+```
+3 mute 10m
+5 mute 1h
+8 kick
+12 ban
+```
+
+Aplica-se o degrau mais alto que os pontos cruzarem. Pontos vencem — 7 dias por padrão, ajustável no mesmo modal — e vencer significa **sair da soma, não ser apagado**: o `/infractions` continua mostrando a linha marcada com ⏳.
+
+`/infractions @usuario` mostra pontos válidos, total de infrações, quando vencem, o degrau atual, o próximo degrau e as 10 últimas linhas. `/infractions @usuario limpar:true` zera o histórico do membro (irreversível).
+
+A ação `Advertir` grava na mesma tabela do `/warn`, com o bot como moderador, então `/warnings` continua contando a história inteira. Mute respeita o teto de 28 dias do Discord; mute, kick e ban conferem a hierarquia antes (`moderatable`, `kickable`, `bannable`) e, quando o bot não alcança o membro, isso vira uma linha no log em vez de uma exceção engolida.
+
+Num flood de 20 mensagens o bot apaga as 20 e **avisa uma vez** (cooldown de aviso por usuário e canal) — sem isso o remédio viraria o spam. Todo aviso vai com `allowedMentions` restrito.
+
+### Isenções
+
+Valem em dois níveis, e a soma dos dois é o que conta: **globais** (cargos e canais para o AutoMod inteiro) e **por regra**. Isentar um canal isenta também os tópicos dele, e isentar uma categoria isenta os canais dentro dela.
+
+A isenção de **moderador** vem ligada por padrão: quem tem `Gerenciar mensagens` não é filtrado, porque quem apaga mensagem alheia não deveria ser punido por mandar cinco seguidas. Dá para desligar no botão `[Isentar mods]`.
+
+`/automod-test texto:"..."` confere um texto contra as regras ligadas sem punir ninguém, e diz o que aconteceria: qual regra pegou, por quê, se apagaria, qual ação, quantos pontos e onde avisaria. Aceita `canal:` e `como:` para simular outro canal ou outro membro — inclusive para descobrir que a resposta é "nada, esse membro está isento". Regras de flood e repetição dependem do histórico real e não são simuladas.
+
+### Log
+
+O select de canal na tela inicial define onde ficam os registros do AutoMod. Sem ele, tudo cai no canal de `/setup-logs`.
+
+> Os comandos `/automod`, `/infractions` e `/automod-test` são novos: rode `npm run deploy` depois de atualizar, senão eles não aparecem no Discord.
 
 ## Sorteios
 
@@ -112,9 +196,9 @@ Só existe pedido de avaliação quando o ticket foi reivindicado — sem atende
 
 ## Emojis configuráveis
 
-Todo emoji que o bot mostra aos membros vive num registro central (`utils/emojis.js`) e pode ser trocado **por servidor** — 24 chaves em 6 categorias: gerais, tickets, sorteios, entrada/verificação, moderação e logs.
+Todo emoji que o bot mostra aos membros vive num registro central (`utils/emojis.js`) e pode ser trocado **por servidor** — 27 chaves em 6 categorias: gerais, tickets, sorteios, entrada/verificação, moderação e logs.
 
-`/config-emojis` abre o painel. Você escolhe a chave no menu e o bot pede para **mandar o emoji novo ali no chat mesmo** — vale o teclado de emojis do Discord ou um emoji personalizado de qualquer servidor em que o bot esteja. Ele lê a mensagem, apaga e salva na hora. Na conversa também dá para escrever `padrao` para restaurar ou `cancelar` para desistir; a janela é de 60 s.
+`/config-emojis` abre o painel. O primeiro menu escolhe a **categoria** e o segundo lista só as chaves dela: um select do Discord aceita 25 opções e o registro já passa disso, então o limite passa a valer por categoria — o próprio módulo recusa subir se alguma categoria estourar 25 chaves. Você escolhe a chave no menu e o bot pede para **mandar o emoji novo ali no chat mesmo** — vale o teclado de emojis do Discord ou um emoji personalizado de qualquer servidor em que o bot esteja. Ele lê a mensagem, apaga e salva na hora. Na conversa também dá para escrever `padrao` para restaurar ou `cancelar` para desistir; a janela é de 60 s.
 
 Só as diferenças em relação ao padrão são gravadas (JSON em `guild_config.emoji_config`), então o painel sempre marca com `✏️` o que foi personalizado e com `·` o que está no padrão. Se um emoji personalizado sair do ar, o painel avisa e o bot volta ao padrão em vez de quebrar a mensagem.
 
@@ -201,9 +285,13 @@ Se você preencher `CLIENT_SECRET`, `OAUTH_REDIRECT_URI` e `OAUTH_PORT` no `.env
 
 - `index.js` — entrypoint (monta o client já com a presença salva) · `deploy-commands.js` — registro de slash commands
 - `database/db.js` — schema SQLite e helpers de config
-- `handlers/` — loaders e a lógica dos painéis: tickets, giveaways, embed, verificação, boas-vindas, status e emojis
-- `events/` — ready, interactionCreate (roteia botões/selects por prefixo do customId), member add/remove, logs
+- `handlers/` — loaders e a lógica dos painéis: tickets, giveaways, embed, verificação, boas-vindas, status, emojis e AutoMod
+- `handlers/automodHandler.js` — o motor (`inspectMessage`) · `handlers/automodSetupHandler.js` — painel do `/automod`
+- `events/` — ready, interactionCreate (roteia botões/selects por prefixo do customId), message create/update, member add/remove, logs
 - `commands/<módulo>/` — um arquivo por comando
+- `config/automodRules.js` — catálogo declarativo das 18 regras (o painel e os detectores leem daqui)
+- `utils/automod/` — `config.js` (JSON normalizado + isenções) · `textNormalize.js` (desdisfarce) · `wildcard.js` (curinga `*` sem regex do usuário) · `tracker.js` (janelas em memória) · `infractions.js` (pontos e escada) · `enforce.js` (ações e log) · `raid.js` · `detectors/`
+- `test/automod.test.js` — testes da lógica pura (`npm test`)
 - `utils/emojis.js` — registro central dos emojis · `utils/emojiSource.js` — download validado do `/emoji-add`
 - `utils/presence.js` — presença salva e normalizada · `utils/presenceKeeper.js` — garante o status após reconexões
 - `utils/captcha.js` — geração do PNG do captcha · `utils/verifyChallenges.js` — desafios e cooldowns em memória

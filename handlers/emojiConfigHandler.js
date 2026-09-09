@@ -24,6 +24,7 @@ const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
 const { colors } = require('../config/settings');
 const {
   CATEGORIES,
+  CATEGORY_KEYS,
   REGISTRY,
   KEYS,
   DEFAULT_EMOJIS,
@@ -40,6 +41,12 @@ const {
 const { makeSafeAck } = require('../utils/interactionAck');
 
 const PREFIX = 'cfgemoji_';
+
+/** Categoria mostrada quando o painel abre. */
+const DEFAULT_CATEGORY = Object.keys(CATEGORIES)[0];
+
+/** Categoria válida, ou a primeira — protege contra customId adulterado. */
+const safeCategory = (value) => (Object.hasOwn(CATEGORIES, value) ? value : DEFAULT_CATEGORY);
 
 /** Quanto tempo o bot espera a mensagem com o emoji. */
 const CAPTURE_MS = 60_000;
@@ -61,13 +68,13 @@ function statusOf(guild, key, value) {
   return value === DEFAULT_EMOJIS[key] ? '·' : '✏️';
 }
 
-function panelEmbed(guild, emojis) {
+function panelEmbed(guild, emojis, category) {
   const broken = KEYS.filter((key) => isBrokenCustomEmoji(guild, emojis[key]));
   const changed = KEYS.filter((key) => emojis[key] !== DEFAULT_EMOJIS[key]);
 
-  const fields = Object.entries(CATEGORIES).map(([category, label]) => ({
-    name: label,
-    value: KEYS.filter((key) => REGISTRY[key].category === category)
+  const fields = Object.entries(CATEGORIES).map(([name, label]) => ({
+    name: name === category ? `▸ ${label}` : label,
+    value: CATEGORY_KEYS[name]
       .map((key) => `${statusOf(guild, key, emojis[key])} ${emojis[key]} — ${REGISTRY[key].label}`)
       .join('\n'),
     inline: true,
@@ -86,23 +93,43 @@ function panelEmbed(guild, emojis) {
   return baseEmbed({
     title: '😀 Emojis do bot',
     description:
-      'Escolha um emoji na lista: o bot vai pedir para você **mandar o emoji novo aqui no chat**.\n' +
-      '`✏️` = alterado · `·` = padrão',
+      `Mostrando **${CATEGORIES[category]}**. Escolha um emoji na lista: o bot vai pedir para você ` +
+      '**mandar o emoji novo aqui no chat**.\n`✏️` = alterado · `·` = padrão',
     color: broken.length ? colors.warning : colors.primary,
     fields,
     footer: `${changed.length} de ${KEYS.length} personalizados · vale só neste servidor`,
   });
 }
 
-function panelComponents(guild, emojis) {
+/**
+ * As opções do select de chaves vêm só da categoria aberta.
+ *
+ * Um select do Discord aceita 25 opções e o registro já passa disso — filtrar por
+ * categoria mantém o painel válido por construção, sem precisar cortar a lista.
+ */
+function panelComponents(guild, emojis, category) {
   const changed = KEYS.some((key) => emojis[key] !== DEFAULT_EMOJIS[key]);
+
+  const categoryRow = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`${PREFIX}cat`)
+      .setPlaceholder('Categoria')
+      .addOptions(
+        Object.entries(CATEGORIES).map(([name, label]) => ({
+          label,
+          value: name,
+          default: name === category,
+          description: `${CATEGORY_KEYS[name].length} emoji(s)`,
+        }))
+      )
+  );
 
   const pickRow = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
-      .setCustomId(`${PREFIX}pick`)
-      .setPlaceholder('Escolha o emoji que quer trocar')
+      .setCustomId(`${PREFIX}pick:${category}`)
+      .setPlaceholder(`Escolha o emoji que quer trocar — ${CATEGORIES[category]}`)
       .addOptions(
-        KEYS.map((key) => ({
+        CATEGORY_KEYS[category].map((key) => ({
           label: REGISTRY[key].label,
           value: key,
           // emoji() já cai no padrão se o personalizado sumiu: um id inválido
@@ -115,7 +142,7 @@ function panelComponents(guild, emojis) {
 
   const actionRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`${PREFIX}resetall`)
+      .setCustomId(`${PREFIX}resetall:${category}`)
       .setLabel('Restaurar todos')
       .setEmoji('♻️')
       .setStyle(ButtonStyle.Danger)
@@ -123,22 +150,25 @@ function panelComponents(guild, emojis) {
     new ButtonBuilder().setCustomId(`${PREFIX}close`).setLabel('Fechar').setEmoji('❌').setStyle(ButtonStyle.Secondary)
   );
 
-  return [pickRow, actionRow];
+  return [categoryRow, pickRow, actionRow];
 }
 
 /**
  * Payload do painel. `notice` é o feedback da última ação.
  * @param {import('discord.js').Guild} guild
+ * @param {string} notice
+ * @param {string} category categoria aberta
  */
-function buildEmojiPanel(guild, notice = '') {
+function buildEmojiPanel(guild, notice = '', category = DEFAULT_CATEGORY) {
+  const open = safeCategory(category);
   const emojis = getGuildEmojis(guild.id);
   const header = ['🎛️ **Painel de emojis** — só você vê isto.'];
   if (notice) header.push(notice);
 
   return {
     content: header.join('\n'),
-    embeds: [panelEmbed(guild, emojis)],
-    components: panelComponents(guild, emojis),
+    embeds: [panelEmbed(guild, emojis, open)],
+    components: panelComponents(guild, emojis, open),
   };
 }
 
@@ -167,7 +197,9 @@ function buildCapturePanel(guild, key) {
     components: [
       new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId(`${PREFIX}cancel`)
+          // A categoria vem da própria chave: cancelar devolve o painel na
+          // mesma aba de onde o usuário saiu.
+          .setCustomId(`${PREFIX}cancel:${meta.category}`)
           .setLabel('Cancelar')
           .setEmoji('❌')
           .setStyle(ButtonStyle.Secondary)
@@ -179,17 +211,17 @@ function buildCapturePanel(guild, key) {
 /** Acka tolerando token morto/duplicado (mesma razão dos outros painéis). */
 const safeAck = makeSafeAck('config-emojis');
 
-function redraw(interaction, notice) {
-  return safeAck(interaction, () => interaction.update(buildEmojiPanel(interaction.guild, notice)));
+function redraw(interaction, notice, category) {
+  return safeAck(interaction, () => interaction.update(buildEmojiPanel(interaction.guild, notice, category)));
 }
 
 /**
  * Volta ao painel depois que a interação já foi ackada — é o caso do coletor,
  * que responde minutos depois do clique no select.
  */
-async function repaint(interaction, notice) {
+async function repaint(interaction, notice, category) {
   try {
-    await interaction.editReply(buildEmojiPanel(interaction.guild, notice));
+    await interaction.editReply(buildEmojiPanel(interaction.guild, notice, category));
   } catch (err) {
     // Token de 15 min expirado ou painel fechado: nada a fazer.
     console.warn('[config-emojis] Não foi possível repintar o painel:', err.message);
@@ -205,16 +237,17 @@ async function tidyUp(message) {
 /** Aplica o que o usuário mandou no chat à chave em edição. */
 async function applyCaptured(interaction, key, message) {
   const meta = REGISTRY[key];
+  const back = meta.category;
   const text = message.content.trim();
   const word = text.toLowerCase();
 
   await tidyUp(message);
 
-  if (CANCEL_WORDS.includes(word)) return repaint(interaction, '↩️ Alteração cancelada.');
+  if (CANCEL_WORDS.includes(word)) return repaint(interaction, '↩️ Alteração cancelada.', back);
 
   if (RESET_WORDS.includes(word)) {
     resetGuildEmoji(interaction.guild.id, key);
-    return repaint(interaction, `♻️ **${meta.label}** voltou ao padrão ${meta.default}.`);
+    return repaint(interaction, `♻️ **${meta.label}** voltou ao padrão ${meta.default}.`, back);
   }
 
   const found = extractFirstEmoji(text);
@@ -222,12 +255,13 @@ async function applyCaptured(interaction, key, message) {
     return repaint(
       interaction,
       `⚠️ Não encontrei nenhum emoji em "${text.slice(0, 60)}". **${meta.label}** ficou como estava — ` +
-        'escolha na lista para tentar de novo.'
+        'escolha na lista para tentar de novo.',
+      back
     );
   }
 
   const parsed = parseEmojiInput(found);
-  if (!parsed.ok) return repaint(interaction, `⚠️ ${parsed.error}`);
+  if (!parsed.ok) return repaint(interaction, `⚠️ ${parsed.error}`, back);
 
   // Emoji personalizado que o bot não alcança não renderiza e quebraria os
   // botões, então é recusado aqui em vez de virar erro na hora de usar.
@@ -236,12 +270,13 @@ async function applyCaptured(interaction, key, message) {
     return repaint(
       interaction,
       `⚠️ Não consigo usar \`:${custom.name}:\` — ele está num servidor onde eu não estou. ` +
-        'Adicione-o aqui com `/emoji-add` e tente de novo.'
+        'Adicione-o aqui com `/emoji-add` e tente de novo.',
+      back
     );
   }
 
   setGuildEmoji(interaction.guild.id, key, parsed.value);
-  return repaint(interaction, `${parsed.value} **${meta.label}** atualizado.`);
+  return repaint(interaction, `${parsed.value} **${meta.label}** atualizado.`, back);
 }
 
 /**
@@ -252,7 +287,11 @@ async function applyCaptured(interaction, key, message) {
 async function startCapture(interaction, key) {
   const channel = interaction.channel;
   if (!channel) {
-    return redraw(interaction, '⚠️ Não consigo escutar este canal. Use o comando num canal de texto normal.');
+    return redraw(
+      interaction,
+      '⚠️ Não consigo escutar este canal. Use o comando num canal de texto normal.',
+      REGISTRY[key].category
+    );
   }
 
   const acked = await safeAck(interaction, () => interaction.update(buildCapturePanel(interaction.guild, key)));
@@ -275,7 +314,7 @@ async function startCapture(interaction, key) {
 
     const message = collected.first();
     if (!message) {
-      await repaint(interaction, '⌛ Tempo esgotado, nada foi alterado.');
+      await repaint(interaction, '⌛ Tempo esgotado, nada foi alterado.', REGISTRY[key].category);
       return;
     }
 
@@ -283,22 +322,22 @@ async function startCapture(interaction, key) {
       await applyCaptured(interaction, key, message);
     } catch (err) {
       console.error('[config-emojis] Erro ao aplicar emoji do chat:', err);
-      await repaint(interaction, '⚠️ Algo deu errado ao salvar. Tente de novo.');
+      await repaint(interaction, '⚠️ Algo deu errado ao salvar. Tente de novo.', REGISTRY[key].category);
     }
   });
 
   return undefined;
 }
 
-function handleCancel(interaction) {
+function handleCancel(interaction, category) {
   captures.get(interaction.message.id)?.stop('cancelado');
-  return redraw(interaction, '↩️ Alteração cancelada.');
+  return redraw(interaction, '↩️ Alteração cancelada.', category);
 }
 
-function handleResetAll(interaction) {
+function handleResetAll(interaction, category) {
   captures.get(interaction.message.id)?.stop('cancelado');
   resetGuildEmojis(interaction.guild.id);
-  return redraw(interaction, '♻️ Todos os emojis voltaram ao padrão.');
+  return redraw(interaction, '♻️ Todos os emojis voltaram ao padrão.', category);
 }
 
 function handleClose(interaction) {
@@ -324,17 +363,21 @@ async function routeEmojiConfig(interaction) {
     );
   }
 
-  const action = interaction.customId.slice(PREFIX.length);
+  // `acao:categoria` — a aba aberta viaja no customId, então o painel sobrevive
+  // a um restart do bot sem perder de vista onde o usuário estava.
+  const [action, rawCategory = ''] = interaction.customId.slice(PREFIX.length).split(':');
+  const category = safeCategory(rawCategory);
 
+  if (action === 'cat') return redraw(interaction, '', interaction.values[0]);
   if (action === 'pick') {
     const key = interaction.values[0];
-    if (!Object.hasOwn(REGISTRY, key)) return redraw(interaction, '⚠️ Esse emoji não existe mais.');
+    if (!Object.hasOwn(REGISTRY, key)) return redraw(interaction, '⚠️ Esse emoji não existe mais.', category);
     return startCapture(interaction, key);
   }
-  if (action === 'cancel') return handleCancel(interaction);
-  if (action === 'resetall') return handleResetAll(interaction);
+  if (action === 'cancel') return handleCancel(interaction, category);
+  if (action === 'resetall') return handleResetAll(interaction, category);
   if (action === 'close') return handleClose(interaction);
   return undefined;
 }
 
-module.exports = { PREFIX, CAPTURE_MS, buildEmojiPanel, isAllowed, routeEmojiConfig };
+module.exports = { PREFIX, CAPTURE_MS, DEFAULT_CATEGORY, buildEmojiPanel, isAllowed, routeEmojiConfig };
