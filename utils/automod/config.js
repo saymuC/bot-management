@@ -132,7 +132,9 @@ function normalizeConfig(raw) {
   return {
     enabled: normalizeBool(source.enabled, false),
     logChannelId: isSnowflake(source.logChannelId) ? source.logChannelId : null,
-    exemptModerators: normalizeBool(source.exemptModerators, true),
+    // Desligado por padrão: nenhum filtro deduz isenção de permissão do Discord.
+    // Quem quiser poupar a equipe liga isto ou põe o cargo nas isenções.
+    exemptModerators: normalizeBool(source.exemptModerators, false),
     exemptRoleIds: normalizeIds(source.exemptRoleIds),
     exemptChannelIds: normalizeIds(source.exemptChannelIds),
     pointsExpireHours: clampInt(source.pointsExpireHours, {
@@ -185,8 +187,11 @@ function updateConfig(guildId, changes) {
 /**
  * Por que o membro está livre desta regra, ou null se não está.
  *
- * A isenção de moderador existe para o filtro não atrapalhar quem modera: quem
- * pode apagar mensagem alheia não deveria ser punido por mandar cinco seguidas.
+ * As isenções são **só** as do bot: cargo, canal e o interruptor de moderador.
+ * Nenhum filtro deduz isenção de permissão do Discord — se alguém deve poder
+ * mencionar todos ou mandar link, o cargo ou o canal dele entra numa das listas.
+ * A única exceção é opt-in e visível no painel: `exemptModerators`, desligado
+ * por padrão, que poupa quem tem `Gerenciar mensagens`.
  *
  * @param {import('discord.js').GuildMember|null} member
  * @param {string|null} channelId

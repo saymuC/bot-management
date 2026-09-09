@@ -41,7 +41,9 @@ module.exports = {
     }
 
     const config = getAutomodConfig(interaction.guild.id);
-    const enabledCount = Object.values(config.rules).filter((rule) => rule.enabled).length;
+    // A lista, não a contagem: "2 filtros ligados" não ajuda quem esperava que o
+    // filtro de palavras estivesse entre eles.
+    const enabled = Object.keys(config.rules).filter((key) => config.rules[key].enabled);
 
     // A isenção é a explicação mais comum para "o AutoMod não pegou": vale dizer
     // antes de mostrar que nada foi encontrado.
@@ -51,8 +53,14 @@ module.exports = {
 
     const fields = [
       { name: 'AutoMod', value: config.enabled ? '🟢 ativado' : '🔴 **desativado** (nada seria filtrado)', inline: true },
-      { name: 'Filtros ligados', value: `${enabledCount}`, inline: true },
       { name: 'Simulado como', value: `${member} em ${channel}`, inline: true },
+      {
+        name: `Filtros ligados (${enabled.length} de ${Object.keys(config.rules).length})`,
+        value: enabled.length
+          ? enabled.map((key) => `${RULES[key].emoji} ${RULES[key].label}`).join(' · ')
+          : '**nenhum** — ligue os filtros no `/automod`, senão não há o que testar.',
+        inline: false,
+      },
     ];
 
     if (exempt) fields.push({ name: '🪪 Isenção global', value: `Este membro/canal está livre: **${exempt}**.`, inline: false });

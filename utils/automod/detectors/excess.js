@@ -8,7 +8,6 @@
  * o número encontrado contra o limite) ou `null` quando está tudo bem.
  */
 
-const { PermissionFlagsBits } = require('discord.js');
 const { capsRatio, zalgoRatio, countEmojis, countSpoilers } = require('../textNormalize');
 
 /** Menções escritas no corpo da mensagem, de usuário e de cargo. */
@@ -31,13 +30,16 @@ const detectors = {
    * Checado pelo texto, não por `mentions.everyone`: quem não tem permissão de
    * mencionar todos escreve "@everyone" e o Discord não resolve a menção, então
    * `mentions.everyone` seria falso e a tentativa passaria batida. E é
-   * justamente a tentativa que incomoda no chat. Quem tem a permissão de
-   * verdade está isento — para o anúncio legítimo do staff não cair aqui.
+   * justamente a tentativa que incomoda no chat.
+   *
+   * A permissão do Discord **não** isenta ninguém aqui: quem pode mencionar
+   * todos e deve continuar podendo entra nas isenções do próprio bot (cargo ou
+   * canal). Deduzir a isenção da permissão fazia o filtro parecer quebrado em
+   * qualquer servidor que deixa `Mencionar @everyone` aberta no cargo @everyone.
    */
-  everyone({ content, member }) {
-    if (member?.permissions?.has(PermissionFlagsBits.MentionEveryone)) return null;
+  everyone({ content }) {
     if (!/@(everyone|here)\b/i.test(content)) return null;
-    return { detail: 'tentou mencionar todos sem ter permissão' };
+    return { detail: 'mencionou todos' };
   },
 
   mentions({ content }, limits) {

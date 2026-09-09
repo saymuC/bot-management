@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { respond } = require('../../utils/interactions');
 const { getAutomodConfig } = require('../../utils/automod/config');
-const { homePayload } = require('../../handlers/automodSetupHandler');
+const { homeFor } = require('../../handlers/automodSetupHandler');
 
 module.exports = {
   ephemeral: true,
@@ -13,6 +13,6 @@ module.exports = {
 
   async execute(interaction) {
     const config = getAutomodConfig(interaction.guild.id);
-    return respond(interaction, homePayload(config, interaction.guild));
+    return respond(interaction, homeFor(interaction, config));
   },
 };

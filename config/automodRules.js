@@ -61,7 +61,7 @@ const bool = (label, def, hint) => ({ type: 'bool', label, default: def, hint })
 const list = (label, hint) => ({ type: 'list', label, default: [], hint });
 
 /**
- * As 18 regras. A ordem aqui é a ordem de avaliação no motor: o mais barato de
+ * As 19 regras. A ordem aqui é a ordem de avaliação no motor: o mais barato de
  * checar vem antes, e o motor para na primeira violação.
  */
 const RULES = Object.freeze({
@@ -70,7 +70,8 @@ const RULES = Object.freeze({
     family: 'excess',
     label: '@everyone e @here',
     emoji: '📣',
-    description: 'Barra @everyone/@here de quem não tem permissão para mencionar todos.',
+    description:
+      'Barra @everyone/@here de qualquer um. Quem deve poder mencionar entra nas isenções da regra.',
     fields: {},
     defaults: { points: 2 },
   },

@@ -38,9 +38,13 @@ const {
   updateConfig,
   normalizeBool,
   normalizeList,
+  exemptionReason,
 } = require('../utils/automod/config');
 
 const PREFIX = 'amod_';
+
+/** Para consultar só as isenções globais, sem as de nenhuma regra específica. */
+const EMPTY_EXEMPTIONS = Object.freeze({ exemptRoleIds: [], exemptChannelIds: [] });
 
 /** Acka tolerando token morto/duplicado. */
 const safeAck = makeSafeAck('automod-setup');
@@ -167,15 +171,41 @@ function homeComponents(config) {
   return [pickRow, logRow, actionRow];
 }
 
-function homePayload(config, guild, notice = '') {
+/**
+ * Aviso de que quem está lendo o painel não seria filtrado.
+ *
+ * É a explicação mais comum para "configurei tudo e nada aconteceu": a isenção de
+ * moderador vem ligada, e quem abre o /automod quase sempre é moderador. Sem
+ * dizer isso na cara, o admin testa com a própria conta e conclui que o AutoMod
+ * está quebrado.
+ */
+function viewerWarning(config, viewer, channelId) {
+  const reason = viewer ? exemptionReason(config, EMPTY_EXEMPTIONS, viewer, channelId) : null;
+  if (!reason) return '';
+
+  const fix =
+    reason === 'moderador'
+      ? 'Teste com outra conta ou use *Isentar mods: não*.'
+      : 'Tire a isenção ou teste em outro canal / com outra conta.';
+
+  return `⚠️ **Você está isento (${reason}):** nada que você mandar será filtrado. ${fix}`;
+}
+
+function homePayload(config, guild, notice = '', viewer = null, channelId = null) {
   const header = '🛡️ **Painel do AutoMod** — só você vê isto.';
+  const lines = [header, notice, viewerWarning(config, viewer, channelId)].filter(Boolean);
+
   return {
-    content: notice ? `${header}\n${notice}` : header,
+    content: lines.join('\n'),
     embeds: [homeEmbed(config, guild)],
     components: homeComponents(config),
     allowedMentions: { parse: [] },
   };
 }
+
+/** Atalho: o painel sempre pergunta pelas isenções globais, sem as de regra. */
+const homeFor = (interaction, config, notice = '') =>
+  homePayload(config, interaction.guild, notice, interaction.member, interaction.channelId);
 
 // ----------------------------------------------------------------- tela: regra
 
@@ -526,7 +556,7 @@ function saveRule(interaction, key, changes, notice) {
 
 function saveGlobal(interaction, changes, notice) {
   const config = updateConfig(interaction.guild.id, changes);
-  return safeAck(interaction, () => interaction.update(homePayload(config, interaction.guild, notice)));
+  return safeAck(interaction, () => interaction.update(homeFor(interaction, config, notice)));
 }
 
 function handleLimitsSubmit(interaction, key, config) {
@@ -611,7 +641,7 @@ function handleToggleAll(interaction, config) {
   const enabled = !config.enabled;
   if (enabled && !RULE_KEYS.some((key) => config.rules[key].enabled)) {
     return safeAck(interaction, () =>
-      interaction.update(homePayload(config, interaction.guild, '⚠️ Ligue pelo menos um filtro antes — assim o AutoMod não faria nada.'))
+      interaction.update(homeFor(interaction, config, '⚠️ Ligue pelo menos um filtro antes — assim o AutoMod não faria nada.'))
     );
   }
   return saveGlobal(interaction, { enabled }, enabled ? '🟢 AutoMod ativado.' : '🔴 AutoMod desativado.');
@@ -650,7 +680,7 @@ async function routeAutomodSetup(interaction) {
   // em vez de estourar num acesso a RULES[key].
   if (key && !Object.hasOwn(RULES, key)) {
     return safeAck(interaction, () =>
-      interaction.update(homePayload(config, interaction.guild, '⚠️ Esse filtro não existe mais.'))
+      interaction.update(homeFor(interaction, config, '⚠️ Esse filtro não existe mais.'))
     );
   }
 
@@ -662,7 +692,7 @@ async function routeAutomodSetup(interaction) {
     case 'rule':
       return safeAck(interaction, () => interaction.update(rulePayload(key, config, interaction.guild)));
     case 'home':
-      return safeAck(interaction, () => interaction.update(homePayload(config, interaction.guild)));
+      return safeAck(interaction, () => interaction.update(homeFor(interaction, config)));
 
     case 'toggle': {
       const rule = config.rules[key];
@@ -731,6 +761,7 @@ async function routeAutomodSetup(interaction) {
 module.exports = {
   PREFIX,
   homePayload,
+  homeFor,
   rulePayload,
   parseDuration,
   parseLadderLine,

@@ -26,9 +26,13 @@ const {
 const { compileWildcard, compilePatterns, MAX_SEGMENTS } = require('../utils/automod/wildcard');
 const { trackMessage, messageHistory, forgetUser, trackJoin, joinCount, sweep, resetTracker } =
   require('../utils/automod/tracker');
-const { ruleDefaults } = require('../config/automodRules');
+const { RULES, ruleDefaults } = require('../config/automodRules');
 const { normalizeBool, normalizeList, normalizeLadder, normalizeConfig } = require('../utils/automod/config');
-const { detectors: excess, countWrittenMentions, extensionOf } = require('../utils/automod/detectors/excess');
+const {
+  detectors: excess,
+  countWrittenMentions,
+  extensionOf,
+} = require('../utils/automod/detectors/excess');
 const { detectors: words } = require('../utils/automod/detectors/words');
 const { detectors: flood } = require('../utils/automod/detectors/flood');
 const { detectors: links, extractDomains, extractInviteCodes, matchesDomain, linkifiable } =
@@ -276,13 +280,28 @@ test('detector mentions conta usuário e cargo', () => {
   assert.equal(excess.mentions({ content: '<@111111111111111111>' }, limits), null);
 });
 
-test('detector everyone isenta quem tem a permissão', () => {
+test('detector everyone ignora a permissão do Discord', () => {
+  // O caso que fazia o filtro parecer quebrado: cargo @everyone com "Mencionar
+  // @everyone" liberada. A permissão não isenta mais ninguém — quem deve poder
+  // mencionar entra nas isenções do bot.
+  const limits = limitsOf('everyone');
   const withPermission = { permissions: { has: () => true } };
   const without = { permissions: { has: () => false } };
 
-  assert.ok(excess.everyone({ content: 'oi @everyone', member: without }));
-  assert.equal(excess.everyone({ content: 'oi @everyone', member: withPermission }), null);
-  assert.equal(excess.everyone({ content: 'oi pessoal', member: without }), null);
+  assert.ok(excess.everyone({ content: 'oi @everyone', member: without }, limits));
+  assert.ok(excess.everyone({ content: 'oi @everyone', member: withPermission }, limits));
+  assert.ok(excess.everyone({ content: 'oi @here', member: withPermission }, limits));
+  assert.equal(excess.everyone({ content: 'oi pessoal', member: without }, limits), null);
+});
+
+test('nenhuma regra tem limite de isenção por permissão', () => {
+  // Guarda contra a reintrodução do padrão: qualquer campo cujo nome sugira
+  // "ignorar quem pode" deve ser uma isenção explícita, não um limite da regra.
+  for (const [key, rule] of Object.entries(RULES)) {
+    for (const name of Object.keys(rule.fields)) {
+      assert.ok(!/^ignore(Allowed|Permitted)$/.test(name), `${key}.${name} deduz isenção de permissão`);
+    }
+  }
 });
 
 test('detector attachmentTypes aceita extensão com e sem ponto', () => {

@@ -54,10 +54,14 @@ async function inspectMessage(message, { track = true } = {}) {
     return false;
   }
 
-  // Sem permissão de ler o histórico do canal o bot não conseguiria apagar nada;
-  // não vale varrer para depois falhar.
+  // O AutoMod vale em **todo** canal: só o que estiver na lista de isenções fica
+  // de fora. A única desistência é quando o Discord afirma que o bot não vê o
+  // canal — e mesmo aí, se a permissão não puder ser resolvida (`members.me`
+  // ainda não em cache, thread sem o pai carregado), segue examinando em vez de
+  // ignorar a mensagem em silêncio.
   const me = message.guild.members.me;
-  if (!message.channel.permissionsFor(me)?.has(PermissionFlagsBits.ViewChannel)) return false;
+  const perms = me ? message.channel.permissionsFor(me) : null;
+  if (perms && !perms.has(PermissionFlagsBits.ViewChannel)) return false;
 
   const signature = signatureOf(message);
   const now = Date.now();

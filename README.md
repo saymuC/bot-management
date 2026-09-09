@@ -97,17 +97,17 @@ O motor roda **no próprio bot**, não no AutoMod nativo do Discord. Em troca de
 
 `/automod` abre o painel (sem parâmetros). Tudo é salvo na hora, sem botão "salvar". São três telas:
 
-- **Início** — menu com as 18 regras (✅/▫️ indicando ligada), select do canal de logs do AutoMod e os botões `[Ligar/Desligar o AutoMod] [Isenções globais] [Escada] [Isentar mods: sim/não] [Fechar]`. O resumo destaca as regras **ligadas mas sem efeito** (sem apagar, sem ação e sem pontos) — é o erro de configuração mais fácil de cometer.
+- **Início** — menu com as 19 regras (✅/▫️ indicando ligada), select do canal de logs do AutoMod e os botões `[Ligar/Desligar o AutoMod] [Isenções globais] [Escada] [Isentar mods: sim/não] [Fechar]`. O resumo destaca as regras **ligadas mas sem efeito** (sem apagar, sem ação e sem pontos) — é o erro de configuração mais fácil de cometer.
 - **Regra** — select da ação imediata, select de pontos (0–10) e os botões `[Ligar/Desligar] [Limites…] [Isenções] [Voltar] [Fechar]`. "Limites…" abre um modal com os campos daquela regra; listas (palavras, domínios, extensões) vêm uma por linha.
 - **Isenções** — `RoleSelect` + `ChannelSelect` (múltiplos), tanto no escopo global quanto por regra.
 
 O AutoMod só age depois de `[Ligar o AutoMod]`: ligar uma regra sozinha não basta, o que permite configurar tudo com calma antes de valer.
 
-### As 18 regras
+### As 19 regras
 
 | Regra | Família | O que barra | Limites |
 |---|---|---|---|
-| @everyone e @here | Excessos | `@everyone`/`@here` de quem não tem permissão para mencionar todos | — |
+| @everyone e @here | Excessos | `@everyone`/`@here` de qualquer um, tenha ou não a permissão | — |
 | Menções em massa | Excessos | Muitas menções de usuário/cargo na mesma mensagem | máximo de menções |
 | CAIXA ALTA | Excessos | Maiúsculas demais | % de maiúsculas, mínimo de caracteres |
 | Excesso de emojis | Excessos | Emojis normais + personalizados | máximo de emojis |
@@ -156,7 +156,13 @@ Num flood de 20 mensagens o bot apaga as 20 e **avisa uma vez** (cooldown de avi
 
 Valem em dois níveis, e a soma dos dois é o que conta: **globais** (cargos e canais para o AutoMod inteiro) e **por regra**. Isentar um canal isenta também os tópicos dele, e isentar uma categoria isenta os canais dentro dela.
 
-A isenção de **moderador** vem ligada por padrão: quem tem `Gerenciar mensagens` não é filtrado, porque quem apaga mensagem alheia não deveria ser punido por mandar cinco seguidas. Dá para desligar no botão `[Isentar mods]`.
+**Nenhum filtro deduz isenção de permissão do Discord.** Ter `Mencionar @everyone` não livra ninguém do filtro de `@everyone`, e o mesmo vale para as outras regras: se alguém deve poder fazer aquilo, o cargo ou o canal dele entra numa das listas acima. A permissão do Discord diz o que o membro *consegue* fazer; as isenções do bot dizem o que o AutoMod *deixa passar* — e é só a segunda lista que o AutoMod consulta.
+
+A única exceção é explícita e **desligada por padrão**: o botão `[Isentar mods]`, que poupa quem tem `Gerenciar mensagens`. Ligue se não quiser que a equipe seja filtrada.
+
+> Se você ligar, isso vale para **você** também — é a explicação mais comum para "configurei tudo e nada aconteceu". O painel avisa em cima quando quem está lendo está isento, e o `/automod-test` diz o mesmo.
+
+Fora das isenções, o AutoMod vale em **todo** canal que o bot consegue ver — não existe lista de canais onde ele age, só a lista de onde ele não age.
 
 `/automod-test texto:"..."` confere um texto contra as regras ligadas sem punir ninguém, e diz o que aconteceria: qual regra pegou, por quê, se apagaria, qual ação, quantos pontos e onde avisaria. Aceita `canal:` e `como:` para simular outro canal ou outro membro — inclusive para descobrir que a resposta é "nada, esse membro está isento". Regras de flood e repetição dependem do histórico real e não são simuladas.
 
@@ -289,7 +295,7 @@ Se você preencher `CLIENT_SECRET`, `OAUTH_REDIRECT_URI` e `OAUTH_PORT` no `.env
 - `handlers/automodHandler.js` — o motor (`inspectMessage`) · `handlers/automodSetupHandler.js` — painel do `/automod`
 - `events/` — ready, interactionCreate (roteia botões/selects por prefixo do customId), message create/update, member add/remove, logs
 - `commands/<módulo>/` — um arquivo por comando
-- `config/automodRules.js` — catálogo declarativo das 18 regras (o painel e os detectores leem daqui)
+- `config/automodRules.js` — catálogo declarativo das 19 regras (o painel e os detectores leem daqui)
 - `utils/automod/` — `config.js` (JSON normalizado + isenções) · `textNormalize.js` (desdisfarce) · `wildcard.js` (curinga `*` sem regex do usuário) · `tracker.js` (janelas em memória) · `infractions.js` (pontos e escada) · `enforce.js` (ações e log) · `raid.js` · `detectors/`
 - `test/automod.test.js` — testes da lógica pura (`npm test`)
 - `utils/emojis.js` — registro central dos emojis · `utils/emojiSource.js` — download validado do `/emoji-add`
