@@ -55,7 +55,14 @@ const { detectors: links, extractDomains, extractInviteCodes, matchesDomain, lin
 const { ladderStep, crossedStep } = require('../utils/automod/infractions');
 const { pickAction, noticeText, canNotify, NOTICE_COOLDOWN_MS } = require('../utils/automod/enforce');
 const { parseDuration, parseLadderLine, isInert, idleReason } = require('../handlers/automodSetupHandler');
-const { markHandled, wasHandled, HANDLED_TTL_MS } = require('../handlers/automodHandler');
+const {
+  markHandled,
+  wasHandled,
+  handledSize,
+  signatureOf,
+  versionOf,
+  HANDLED_TTL_MS,
+} = require('../handlers/automodHandler');
 
 /** Limites de uma regra, com as sobrescritas do teste por cima. */
 const limitsOf = (key, overrides = {}) => ({ ...ruleDefaults(key).limits, ...overrides });
@@ -723,20 +730,62 @@ test('idleReason aponta a regra ligada que não vai agir', () => {
   assert.equal(idleReason('media', { ...ruleDefaults('media'), enabled: false }), null, 'desligada não é aviso');
 });
 
-test('a trava por id impede punir a mesma mensagem duas vezes', () => {
+test('a trava por id + versão impede punir a mesma mensagem duas vezes', () => {
   const id = '900000000000000001';
   const t0 = 1_000_000;
+  const v = versionOf({ content: 'olha o link ai' });
 
-  assert.equal(wasHandled(id, t0), false, 'mensagem nova ainda não foi punida');
+  assert.equal(wasHandled(id, v, t0), false, 'mensagem nova ainda não foi punida');
 
-  markHandled(id, t0);
+  markHandled(id, v, t0);
   // É este caso que o bug produzia: o `messageUpdate` do anexo chegando segundos
   // depois do `messageCreate` que já apagou e puniu.
-  assert.equal(wasHandled(id, t0 + 2000), true);
+  assert.equal(wasHandled(id, v, t0 + 2000), true);
 
   // Passado o prazo a entrada é descartada, senão o Map cresceria para sempre.
-  assert.equal(wasHandled(id, t0 + HANDLED_TTL_MS + 1), false);
-  assert.equal(wasHandled(id, t0 + 2000), false, 'entrada expirada não volta');
+  assert.equal(wasHandled(id, v, t0 + HANDLED_TTL_MS + 1), false);
+  assert.equal(wasHandled(id, v, t0 + 2000), false, 'entrada expirada não volta');
+});
+
+test('a trava não cobre edição real: texto novo volta a ser examinado', () => {
+  const id = '900000000000000002';
+  const t0 = 2_000_000;
+  const caps = versionOf({ content: 'AAAAAAAA' });
+
+  // Regra que pune sem apagar (caps com deleteMessage: false): a mensagem fica no
+  // canal e o autor pode editá-la para uma infração pior.
+  markHandled(id, caps, t0);
+
+  assert.equal(wasHandled(id, caps, t0 + 1000), true, 'update automático continua travado');
+  assert.equal(
+    wasHandled(id, versionOf({ content: 'https://site-malicioso.example' }), t0 + 2000),
+    false,
+    'texto trocado é edição de verdade e precisa passar pelo AutoMod'
+  );
+  assert.equal(
+    wasHandled(id, caps, t0 + 3000),
+    false,
+    'a entrada antiga saiu junto: a versão punida não existe mais'
+  );
+});
+
+test('a versão da trava distingue caixa, que a assinatura de repetição achata', () => {
+  // "aaaa" -> "AAAA" não muda `signatureOf` (que normaliza a caixa de propósito),
+  // mas muda de "não viola caps" para "viola caps". Se a trava usasse a assinatura,
+  // essa edição escaparia.
+  assert.equal(signatureOf({ content: 'aaaa' }), signatureOf({ content: 'AAAA' }));
+  assert.notEqual(versionOf({ content: 'aaaa' }), versionOf({ content: 'AAAA' }));
+});
+
+test('handled respeita o teto mesmo com tudo dentro do prazo', () => {
+  const t0 = 3_000_000;
+  // Mais que HANDLED_MAX (1000) entradas válidas: sem o corte por antiguidade o
+  // Map passava do teto e só encolhia quando algo vencesse.
+  for (let i = 0; i < 1200; i += 1) markHandled(`t${i}`, `s${i}`, t0 + i);
+
+  assert.equal(handledSize() <= 1000, true, `teto respeitado (tamanho: ${handledSize()})`);
+  assert.equal(wasHandled('t1199', 's1199', t0 + 1200), true, 'a última marcada sobrevive');
+  assert.equal(wasHandled('t0', 's0', t0 + 1200), false, 'a mais antiga foi cortada');
 });
 
 test('isInert aponta a regra ligada que não faz nada', () => {

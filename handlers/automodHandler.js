@@ -6,6 +6,7 @@
  * que custar quase nada.
  */
 
+const { createHash } = require('node:crypto');
 const { PermissionFlagsBits } = require('discord.js');
 const { getAutomodConfig, exemptionReason } = require('../utils/automod/config');
 const { findViolation } = require('../utils/automod/detectors');
@@ -15,6 +16,18 @@ const { toPlain } = require('../utils/automod/textNormalize');
 
 /** Assinatura usada para detectar mensagem repetida. */
 const signatureOf = (message) => toPlain(message.content);
+
+/**
+ * Identidade da **versão** do texto, para a trava de mensagem já punida.
+ *
+ * Deliberadamente diferente de `signatureOf`: aquela normaliza caixa e acento (é o
+ * que faz "OI" e "oi" contarem como repetição), e aqui isso esconderia edição de
+ * verdade — "aaaa" virando "AAAA" passa a violar caps sem mudar a assinatura
+ * normalizada. Hash em vez do texto inteiro para o Map não guardar até 4 mil
+ * caracteres por entrada.
+ */
+const versionOf = (message) =>
+  createHash('sha1').update(String(message.content ?? '')).digest('base64');
 
 /** Anexos + figurinhas contam juntos para o spam de anexos. */
 const attachmentCount = (message) => message.attachments.size + (message.stickers?.size ?? 0);
@@ -29,12 +42,20 @@ const attachmentFiles = (message) =>
   [...message.attachments.values()].map((a) => ({ name: a.name ?? '', contentType: a.contentType ?? '' }));
 
 /**
- * Mensagens já punidas, `id` -> instante. Uma punição por mensagem.
+ * Mensagens já punidas, `id` -> `{ version, at }`. Uma punição por *versão* da
+ * mensagem.
  *
  * Existe porque o Discord manda `messageUpdate` para a **mesma** mensagem sem
  * ninguém tê-la editado: ao resolver um anexo, ao gerar o preview de um link, ao
  * fixar. Sem esta trava, um pdf no canal errado rendia duas punições — a segunda
  * com "não conseguiu apagar", porque a primeira já havia apagado.
+ *
+ * A versão do texto entra na chave porque travar só pelo id abria a brecha inversa:
+ * uma regra que não apaga (`deleteMessage: false`) deixa a mensagem no canal, e o
+ * autor podia editá-la para algo pior — um link malicioso — sabendo que o AutoMod
+ * ia ignorar aquele id pelos cinco minutos seguintes. Mesmo id + mesmo texto é
+ * update automático do Discord; mesmo id + texto diferente é edição de verdade e
+ * precisa ser examinada.
  */
 const handled = new Map();
 
@@ -44,20 +65,50 @@ const HANDLED_TTL_MS = 5 * 60 * 1000;
 /** Teto do Map: infratoras são poucas, mas o processo do bot fica dias no ar. */
 const HANDLED_MAX = 1000;
 
-function markHandled(messageId, now = Date.now()) {
-  if (handled.size >= HANDLED_MAX) {
-    for (const [id, at] of handled) if (now - at >= HANDLED_TTL_MS) handled.delete(id);
+/**
+ * Mantém o Map dentro do teto: primeiro descarta o que já venceu; se ainda estiver
+ * cheio (mil infratoras em cinco minutos), corta as mais antigas.
+ *
+ * Só limpar as expiradas não bastava — com o Map cheio de entradas ainda válidas
+ * nada era removido e ele passava de `HANDLED_MAX` sem limite real. Perder a
+ * entrada mais antiga é a falha certa: no pior caso a mensagem é reexaminada.
+ */
+function prune(now) {
+  if (handled.size < HANDLED_MAX) return;
+
+  for (const [id, entry] of handled) if (now - entry.at >= HANDLED_TTL_MS) handled.delete(id);
+
+  // A ordem de inserção do Map é cronológica porque `markHandled` sempre deleta
+  // antes de gravar — reinserir joga a entrada para o fim.
+  for (const id of handled.keys()) {
+    if (handled.size < HANDLED_MAX) break;
+    handled.delete(id);
   }
-  handled.set(messageId, now);
 }
 
-function wasHandled(messageId, now = Date.now()) {
-  const at = handled.get(messageId);
-  if (at === undefined) return false;
-  if (now - at < HANDLED_TTL_MS) return true;
-
+function markHandled(messageId, version = '', now = Date.now()) {
+  prune(now);
   handled.delete(messageId);
-  return false;
+  handled.set(messageId, { version, at: now });
+}
+
+function wasHandled(messageId, version = '', now = Date.now()) {
+  const entry = handled.get(messageId);
+  if (entry === undefined) return false;
+
+  if (now - entry.at >= HANDLED_TTL_MS) {
+    handled.delete(messageId);
+    return false;
+  }
+
+  // Texto diferente = edição real. A entrada sai para que a nova versão possa ser
+  // punida por conta própria.
+  if (entry.version !== version) {
+    handled.delete(messageId);
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -83,9 +134,11 @@ function isIgnorable(message) {
 async function inspectMessage(message, { track = true } = {}) {
   if (isIgnorable(message)) return false;
 
-  // Já punida: devolve `true` para quem chamou tratar como violação (é o que foi)
-  // sem punir de novo.
-  if (wasHandled(message.id)) return true;
+  // Já punida com este mesmo texto: devolve `true` para quem chamou tratar como
+  // violação (é o que foi) sem punir de novo. O `has` antes evita hashear o texto
+  // de toda mensagem do servidor só para consultar uma trava que quase nunca tem
+  // entrada.
+  if (handled.has(message.id) && wasHandled(message.id, versionOf(message))) return true;
 
   const config = getAutomodConfig(message.guild.id);
   if (!config.enabled) return false;
@@ -144,7 +197,7 @@ async function inspectMessage(message, { track = true } = {}) {
   // Marcado antes de agir: se `enforce` falhar no meio (apagou e não conseguiu
   // silenciar), o update automático que vem em seguida não pode tentar de novo e
   // somar pontos pelo mesmo fato.
-  markHandled(message.id, now);
+  markHandled(message.id, versionOf(message), now);
 
   await enforce(message, violation, config).catch((err) => {
     console.error(`[automod] Falha ao aplicar ação em ${message.guild.id}:`, err.message);
@@ -191,7 +244,11 @@ module.exports = {
   dryRun,
   isIgnorable,
   signatureOf,
+  versionOf,
   HANDLED_TTL_MS,
+  HANDLED_MAX,
   markHandled,
   wasHandled,
+  /** Só para o teste conferir que o teto do Map é respeitado. */
+  handledSize: () => handled.size,
 };
