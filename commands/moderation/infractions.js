@@ -1,6 +1,7 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { respond } = require('../../utils/interactions');
-const { baseEmbed, successEmbed } = require('../../utils/embeds');
+const { baseEmbed, successEmbed, errorEmbed } = require('../../utils/embeds');
+const { logEvent } = require('../../utils/logger');
 const { colors } = require('../../config/settings');
 const { emoji } = require('../../utils/emojis');
 const { formatDuration, parseSqlDate } = require('../../utils/time');
@@ -16,6 +17,98 @@ const {
 
 /** Quantas linhas do histórico o embed mostra. */
 const HISTORY_LIMIT = 10;
+
+/** Teto do motivo. O audit log do Discord corta em 512; o resto é margem. */
+const MAX_REASON = 400;
+
+/**
+ * Desfaz o que o AutoMod (ou um moderador) aplicou: tira o timeout e o ban.
+ *
+ * Kick não tem desfazer — o membro só precisa voltar. Advertências também ficam:
+ * são registro, não restrição, e continuam visíveis no `/warnings`.
+ *
+ * Devolve uma linha por tentativa, sempre — inclusive "não havia nada", porque
+ * "desfiz" sem detalhe deixa a dúvida de se o comando fez algo.
+ *
+ * O `why` vai para o audit log do Discord, não só para o log do bot: quem for
+ * auditar pelo painel do servidor precisa achar o motivo lá também.
+ *
+ * @param {import('discord.js').Guild} guild
+ * @param {import('discord.js').User} user
+ * @param {import('discord.js').GuildMember} moderator quem pediu
+ * @param {string} reason motivo informado, obrigatório
+ * @returns {Promise<{ lines: string[], changed: boolean }>}
+ */
+async function undoPunishments(guild, user, moderator, reason) {
+  const lines = [];
+  let changed = false;
+  const why = `Perdão por ${moderator.user.tag}: ${reason}`.slice(0, 512);
+
+  const member = await guild.members.fetch(user.id).catch(() => null);
+
+  if (!member) {
+    lines.push('🔇 **Silenciamento:** o membro não está no servidor.');
+  } else if (!member.isCommunicationDisabled()) {
+    lines.push('🔇 **Silenciamento:** não havia nenhum ativo.');
+  } else if (!member.moderatable) {
+    lines.push('🔇 **Silenciamento:** ativo, mas não alcanço o membro (hierarquia de cargos).');
+  } else {
+    try {
+      await member.timeout(null, why);
+      lines.push('🔇 **Silenciamento:** removido.');
+      changed = true;
+    } catch (err) {
+      lines.push(`🔇 **Silenciamento:** falhou — ${err.message}`);
+    }
+  }
+
+  // `bans.fetch` de um id não banido devolve erro; é assim que se consulta.
+  const ban = await guild.bans.fetch(user.id).catch(() => null);
+
+  if (!ban) {
+    lines.push('🔨 **Banimento:** não havia nenhum.');
+  } else if (!moderator.permissions.has(PermissionFlagsBits.BanMembers)) {
+    lines.push('🔨 **Banimento:** ativo, mas desbanir exige a permissão de **Banir membros**.');
+  } else {
+    try {
+      await guild.bans.remove(user.id, why);
+      lines.push('🔨 **Banimento:** removido.');
+      changed = true;
+    } catch (err) {
+      lines.push(`🔨 **Banimento:** falhou — ${err.message}`);
+    }
+  }
+
+  return { lines, changed };
+}
+
+/**
+ * Avisa o membro na DM, quando o moderador pediu.
+ *
+ * Falha é rotina, não erro: DM fechada, ou — o caso mais comum aqui — usuário
+ * recém-desbanido, com quem o bot não divide mais nenhum servidor. Por isso a
+ * função nunca lança e sempre devolve uma linha para o relatório.
+ *
+ * @returns {Promise<string>} linha a mostrar ao moderador
+ */
+async function notifyPardon(guild, user, reason, done) {
+  try {
+    await user.send({
+      embeds: [
+        baseEmbed({
+          title: '🕊️ Suas infrações foram perdoadas',
+          description:
+            `A moderação de **${guild.name}** revisou o seu caso.\n\n**Motivo:** ${reason}`,
+          color: colors.success,
+          fields: [{ name: 'O que foi feito', value: done.join('\n').slice(0, 1024) }],
+        }),
+      ],
+    });
+    return '📩 **Aviso na DM:** enviado.';
+  } catch {
+    return '📩 **Aviso na DM:** não foi possível enviar (DM fechada, ou o bot não divide servidor com o usuário).';
+  }
+}
 
 /** Uma linha do histórico. */
 function describeRow(row, expireMs, now) {
@@ -38,21 +131,78 @@ module.exports = {
     .setDMPermission(false)
     .addUserOption((opt) => opt.setName('usuario').setDescription('Membro a consultar').setRequired(true))
     .addBooleanOption((opt) =>
-      opt.setName('limpar').setDescription('Apaga o histórico de infrações deste membro (irreversível)')
+      opt.setName('limpar').setDescription('Zera os pontos: apaga o histórico de infrações (irreversível)')
+    )
+    .addBooleanOption((opt) =>
+      opt.setName('desfazer').setDescription('Remove o silenciamento e o banimento que o AutoMod aplicou')
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('motivo')
+        .setDescription('Por que está perdoando — obrigatório para limpar ou desfazer')
+        .setMaxLength(MAX_REASON)
+    )
+    .addBooleanOption((opt) =>
+      opt.setName('avisar').setDescription('Mandar uma DM ao membro contando do perdão (padrão: não)')
     ),
 
   async execute(interaction) {
     const user = interaction.options.getUser('usuario', true);
     const shouldClear = interaction.options.getBoolean('limpar') ?? false;
+    const shouldUndo = interaction.options.getBoolean('desfazer') ?? false;
+    const reason = interaction.options.getString('motivo')?.trim() ?? '';
+    const shouldNotify = interaction.options.getBoolean('avisar') ?? false;
     const guildId = interaction.guild.id;
 
-    if (shouldClear) {
-      const removed = clearInfractions(guildId, user.id);
+    if (shouldClear || shouldUndo) {
+      // O motivo é a razão de o perdão ser rastreável: sem ele o log diria quem
+      // perdoou e o que apagou, mas não por quê — e é o "por quê" que se procura
+      // meses depois. Por isso ele bloqueia a ação em vez de virar "não informado".
+      if (!reason) {
+        return respond(interaction, {
+          embeds: [
+            errorEmbed(
+              'Informe o `motivo` para confirmar o perdão. Ele vai para o canal de logs, para o audit ' +
+                'log do Discord e (se você pedir `avisar:true`) para a DM do membro.',
+              '📝 Motivo obrigatório'
+            ),
+          ],
+        });
+      }
+
+      const parts = [];
+
+      if (shouldClear) {
+        const removed = clearInfractions(guildId, user.id);
+        parts.push(`🧹 **Pontos:** ${removed} infração(ões) apagadas, pontuação de volta a zero.`);
+      }
+
+      const undone = shouldUndo
+        ? await undoPunishments(interaction.guild, user, interaction.member, reason)
+        : null;
+      if (undone) parts.push(...undone.lines);
+
+      // A DM vai depois de tudo aplicado, para contar o que aconteceu de fato em
+      // vez do que se pretendia fazer.
+      const notice = shouldNotify ? await notifyPardon(interaction.guild, user, reason, parts) : null;
+
+      // O log só faz sentido quando algo mudou de fato: um "desfazer" que não
+      // encontrou nada não é um evento de moderação.
+      if (shouldClear || undone?.changed) {
+        await logEvent(
+          interaction.guild,
+          `${emoji(interaction.guild, 'automod')} Infrações perdoadas`,
+          `**Usuário:** ${user.tag} (${user.id})\n**Moderador:** ${interaction.user.tag}\n` +
+            `**Motivo:** ${reason}\n\n${[...parts, notice].filter(Boolean).join('\n')}`,
+          colors.success
+        );
+      }
+
       return respond(interaction, {
         embeds: [
           successEmbed(
-            `${removed} infração(ões) de **${user.tag}** apagadas. Os pontos voltaram a zero.`,
-            '🧹 Histórico limpo'
+            `**Motivo:** ${reason}\n\n${[...parts, notice].filter(Boolean).join('\n')}`,
+            `🕊️ Perdão aplicado a ${user.tag}`
           ),
         ],
       });

@@ -38,7 +38,7 @@ São 31 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 | `/warn usuario motivo` | Aplica uma advertência a um membro | Moderar membros |
 | `/warnings usuario` | Lista as advertências de um membro | Moderar membros |
 | `/clear quantidade` | Apaga mensagens do canal atual | Gerenciar mensagens |
-| `/infractions usuario limpar` | Pontos, degrau da escada e histórico de infrações do AutoMod | Moderar membros |
+| `/infractions usuario limpar desfazer motivo avisar` | Pontos, degrau da escada e histórico de infrações do AutoMod — e o perdão, que zera os pontos e desfaz mute/ban (motivo obrigatório, DM opcional) | Moderar membros |
 | `/automod-test texto canal como` | Testa um texto contra as regras sem punir ninguém | Gerenciar servidor |
 
 ### Tickets
@@ -146,7 +146,22 @@ Os pontos alimentam a **escada**, configurada no botão `[Escada]` com um degrau
 
 Aplica-se o degrau mais alto que os pontos cruzarem. Pontos vencem — 7 dias por padrão, ajustável no mesmo modal — e vencer significa **sair da soma, não ser apagado**: o `/infractions` continua mostrando a linha marcada com ⏳.
 
-`/infractions @usuario` mostra pontos válidos, total de infrações, quando vencem, o degrau atual, o próximo degrau e as 10 últimas linhas. `/infractions @usuario limpar:true` zera o histórico do membro (irreversível).
+`/infractions @usuario` mostra pontos válidos, total de infrações, quando vencem, o degrau atual, o próximo degrau e as 10 últimas linhas.
+
+### Perdoar
+
+O AutoMod pune sozinho, então precisa dar para voltar atrás sozinho também. As duas metades do perdão são opções independentes do `/infractions`, e podem vir juntas:
+
+- **`limpar:true`** — apaga o histórico de infrações do membro e a pontuação volta a zero, o que também tira o membro do degrau em que ele estava. Irreversível.
+- **`desfazer:true`** — remove o **silenciamento** ativo e o **banimento**, se existirem.
+
+**`motivo` é obrigatório** para qualquer uma das duas: sem ele o comando não executa nada e responde pedindo o motivo. É o que torna o perdão rastreável — meses depois se procura o *por quê*, não o *o quê*. O motivo vai para três lugares: o canal de logs do bot, o audit log do Discord (junto do unmute e do unban, para quem auditar pelo painel do servidor achar lá também) e, se você pedir, a DM do membro.
+
+- **`avisar:true`** — manda uma DM ao membro contando do perdão, com o motivo e o que foi feito. Padrão: **não** — uma DM é um efeito visível fora do servidor, então só sai quando pedida. A DM pode falhar sem que nada esteja errado: DM fechada, ou — o caso mais comum aqui — usuário recém-desbanido, com quem o bot não divide mais nenhum servidor. Falhando ou não, a resposta diz qual dos dois aconteceu.
+
+`/infractions @usuario limpar:true desfazer:true motivo:"engano na moderação" avisar:true` é o perdão completo: sem pontos, sem mute, sem ban, com aviso.
+
+O que **não** é desfeito: expulsão (não há o que desfazer — o membro só precisa voltar) e advertências, que são registro e não restrição, e continuam no `/warnings`. A resposta diz uma linha por item, inclusive quando não havia nada a remover, quando a hierarquia de cargos impede, ou quando desbanir exigiria a permissão de *Banir membros* que quem pediu não tem. Só um perdão que mudou algo de fato vira linha no canal de logs.
 
 A ação `Advertir` grava na mesma tabela do `/warn`, com o bot como moderador, então `/warnings` continua contando a história inteira. Mute respeita o teto de 28 dias do Discord; mute, kick e ban conferem a hierarquia antes (`moderatable`, `kickable`, `bannable`) e, quando o bot não alcança o membro, isso vira uma linha no log em vez de uma exceção engolida.
 
@@ -225,7 +240,9 @@ Dá para escolher a bolinha (online, ausente, não perturbe, invisível) e o tip
 
 O status é aplicado de forma redundante porque o gateway o zera em cada reconexão: ele vai dentro do IDENTIFY (nasce certo em todo login) e é reconferido nos eventos de reconexão. A conferência é "olha antes de agir" — se o status já está correto, nada é enviado; se divergir, o bot corrige e confere de novo, até 3 tentativas. Não há verificação periódica em segundo plano.
 
-> Reler o status real depende da intent privilegiada `GuildPresences`, que este bot não usa. Sem ela o status é aplicado sem conferência (o que basta, já que ele também vai no IDENTIFY).
+Reler o status real depende da intent privilegiada `PRESENCE INTENT` (`GuildPresences`), que o bot pede no IDENTIFY. Ligá-la no portal do Discord **não basta** — ela também tem de ser pedida pelo código, e é isso que faz a conferência funcionar em vez de o bot reaplicar às cegas a cada reconexão.
+
+> Se você não quiser ligá-la no portal, ponha `PRESENCE_INTENT=false` no `.env`: o bot deixa de pedir a intent, o status passa a ser aplicado sem conferência (o que basta, já que ele também vai no IDENTIFY) e o log diz isso uma vez. Pedir uma intent privilegiada que está desligada no portal derruba o login — nesse caso o bot agora explica exatamente o que fazer em vez de morrer num stack trace.
 
 ## Verificação por captcha
 

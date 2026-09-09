@@ -13,12 +13,12 @@
  * periódica: o gatilho é sempre um evento (ready, reconexão, `/bot-status`).
  *
  * Limitação honesta: ler a presença real depende da intent privilegiada
- * `GuildPresences`. Sem ela, `readLivePresence` devolve `null`, e aí o único
- * caminho é enviar uma vez e confiar (é o que o bot faz hoje, já que a presença
- * também vai no IDENTIFY, montado no `index.js`).
+ * `GuildPresences`, pedida no `index.js`. Sem ela, `readLivePresence` devolve
+ * `null` e o único caminho é enviar uma vez e confiar (a presença também vai no
+ * IDENTIFY). Com ela, o bot confere antes e não mexe em nada quando já está certo.
  */
 
-const { ActivityType, Events } = require('discord.js');
+const { ActivityType, Events, GatewayIntentBits } = require('discord.js');
 const { getSavedPresence, buildPresenceData, applyPresence, describePresence } = require('./presence');
 
 /** Tempo para o Discord ecoar a mudança antes da conferência. */
@@ -50,6 +50,16 @@ function sleep(ms) {
  * @returns {import('discord.js').Presence|null} null quando não é observável
  *   (sem a intent `GuildPresences`, ou nenhuma guild em cache ainda).
  */
+/**
+ * A intent de presença foi pedida no IDENTIFY?
+ *
+ * Ligar `PRESENCE INTENT` no portal do Discord não basta — sem pedir a intent
+ * aqui o gateway não manda presença nenhuma. Separar os dois casos importa: "não
+ * pedi a intent" é configuração, "pedi mas ainda não tenho em cache" é só tempo.
+ */
+const hasPresenceIntent = (client) =>
+  Boolean(client.options?.intents?.has?.(GatewayIntentBits.GuildPresences));
+
 function readLivePresence(client) {
   for (const guild of client.guilds.cache.values()) {
     const presence = guild.members.me?.presence;
@@ -106,9 +116,15 @@ async function ensurePresence(client, reason, { alreadySent = false } = {}) {
         }
 
         if (!live) {
-          // Sem a intent não há o que conferir: envia uma vez e encerra.
+          // Nada para conferir agora: envia uma vez e encerra. O próximo evento
+          // (reconexão ou `/bot-status`) tenta de novo, já com o cache quente.
           if (!warnedNoIntent) {
-            console.log('[presence] Sem a intent GuildPresences não consigo reler o status; aplico sem conferir.');
+            console.log(
+              hasPresenceIntent(client)
+                ? '[presence] Presença ainda não está em cache; aplico sem conferir desta vez.'
+                : '[presence] Sem a intent GuildPresences não consigo reler o status; aplico sem conferir. ' +
+                    'Ligue PRESENCE INTENT no portal e tire PRESENCE_INTENT=false do .env para o bot conferir antes de mexer.'
+            );
             warnedNoIntent = true;
           }
           try {
@@ -184,6 +200,7 @@ module.exports = {
   VERIFY_DELAY_MS,
   MAX_ATTEMPTS,
   readLivePresence,
+  hasPresenceIntent,
   matchesTarget,
   startPresenceKeeper,
   setDesiredPresence,
