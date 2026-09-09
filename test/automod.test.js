@@ -26,8 +26,21 @@ const {
 const { compileWildcard, compilePatterns, MAX_SEGMENTS } = require('../utils/automod/wildcard');
 const { trackMessage, messageHistory, forgetUser, trackJoin, joinCount, sweep, resetTracker } =
   require('../utils/automod/tracker');
-const { RULES, ruleDefaults } = require('../config/automodRules');
-const { normalizeBool, normalizeList, normalizeLadder, normalizeConfig } = require('../utils/automod/config');
+const {
+  RULES,
+  ruleDefaults,
+  BASE_DEFAULTS,
+  NOTICE_TTL_CHOICES,
+  MIN_NOTICE_TTL_MS,
+  MAX_NOTICE_TTL_MS,
+} = require('../config/automodRules');
+const {
+  normalizeBool,
+  normalizeList,
+  normalizeLadder,
+  normalizeNoticeTtl,
+  normalizeConfig,
+} = require('../utils/automod/config');
 const {
   detectors: excess,
   countWrittenMentions,
@@ -259,6 +272,47 @@ test('normalizeConfig prende valor fora da faixa ao limite do catálogo', () => 
 
   assert.equal(config.rules.mentions.points, 10);
   assert.equal(config.rules.mentions.limits.max, 50);
+});
+
+test('aviso no canal não se apaga por padrão', () => {
+  // O padrão é ficar: uma mensagem que desaparece sem ninguém ter pedido não dá
+  // para reler depois. Só um prazo escolhido de propósito liga a autodestruição.
+  const config = normalizeConfig({});
+
+  // O alcance padrão é o canal (regras de flood escolhem a DM de propósito, para
+  // não somar barulho ao barulho), e nenhuma regra nasce apagando o próprio aviso.
+  assert.equal(BASE_DEFAULTS.notify, 'channel');
+  assert.equal(BASE_DEFAULTS.noticeTtlMs, 0);
+
+  for (const key of Object.keys(RULES)) {
+    assert.ok(['none', 'channel', 'dm'].includes(config.rules[key].notify), `${key} tem alcance inválido`);
+    assert.equal(config.rules[key].noticeTtlMs, 0, `${key} não deveria apagar o aviso sozinho`);
+  }
+});
+
+test('normalizeNoticeTtl trata zero como valor, não como ausência', () => {
+  // O bug fácil aqui é o zero cair no piso de 3s e o aviso voltar a se apagar.
+  assert.equal(normalizeNoticeTtl(0, 10_000), 0);
+  assert.equal(normalizeNoticeTtl('0', 10_000), 0);
+
+  // Fora da faixa: prende no piso e no teto em vez de recusar.
+  assert.equal(normalizeNoticeTtl(500, 0), MIN_NOTICE_TTL_MS);
+  assert.equal(normalizeNoticeTtl(99_999_999, 0), MAX_NOTICE_TTL_MS);
+
+  // Lixo e negativo caem no default, sem inventar prazo.
+  assert.equal(normalizeNoticeTtl('qualquer coisa', 0), 0);
+  assert.equal(normalizeNoticeTtl(-1, 0), 0);
+  assert.equal(normalizeNoticeTtl(undefined, 5_000), 5_000);
+});
+
+test('as opções de prazo do painel cabem no que a config aceita', () => {
+  // Guarda contra o painel oferecer um valor que a normalização depois altera —
+  // o usuário escolheria "5 minutos" e veria outra coisa salva.
+  for (const choice of NOTICE_TTL_CHOICES) {
+    assert.equal(normalizeNoticeTtl(choice.ms, -1), choice.ms, `opção ${choice.label} não sobrevive`);
+  }
+  assert.ok(NOTICE_TTL_CHOICES.length <= 25, 'select do Discord aceita 25 opções');
+  assert.equal(NOTICE_TTL_CHOICES[0].ms, 0, 'a primeira opção deve ser a de não apagar');
 });
 
 // ---------------------------------------------------------------------------

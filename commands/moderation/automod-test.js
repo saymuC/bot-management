@@ -9,6 +9,7 @@ const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { respond } = require('../../utils/interactions');
 const { baseEmbed } = require('../../utils/embeds');
 const { colors } = require('../../config/settings');
+const { formatDuration } = require('../../utils/time');
 const { RULES, ACTIONS, NOTIFY_MODES } = require('../../config/automodRules');
 const { getAutomodConfig, exemptionReason } = require('../../utils/automod/config');
 const { dryRun } = require('../../handlers/automodHandler');
@@ -77,7 +78,15 @@ module.exports = {
             `${ACTIONS[rule.action].emoji} ${ACTIONS[rule.action].label}`,
             `🎯 +${rule.points} ponto(s)`,
             `${NOTIFY_MODES[rule.notify].emoji} ${NOTIFY_MODES[rule.notify].label}`,
-          ].join('\n'),
+            // Só o aviso no canal tem prazo; a DM é do usuário e o bot não a apaga.
+            rule.notify === 'channel'
+              ? rule.noticeTtlMs > 0
+                ? `⏱️ o aviso se apaga em ${formatDuration(rule.noticeTtlMs)}`
+                : '📌 o aviso fica no canal'
+              : null,
+          ]
+            .filter(Boolean)
+            .join('\n'),
           inline: false,
         }
       );

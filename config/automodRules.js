@@ -33,12 +33,41 @@ const ACTIONS = Object.freeze({
   ban: { label: 'Banir', emoji: '🔨', description: 'Remove e impede de voltar' },
 });
 
-/** Para onde vai o aviso ao infrator. */
+/**
+ * Quem vê o aviso ao infrator.
+ *
+ * Só existem estes dois alcances porque uma mensagem comum de bot não pode ser
+ * efêmera — "só o infrator vê" no Discord é a DM, não um recado invisível no
+ * canal. O padrão é o canal: o recado educa quem estava vendo a infração.
+ */
 const NOTIFY_MODES = Object.freeze({
   none: { label: 'Não avisar', emoji: '🤫' },
-  channel: { label: 'No canal (apaga sozinho)', emoji: '💬' },
-  dm: { label: 'Na DM', emoji: '📩' },
+  channel: { label: 'No canal, todos veem', emoji: '💬' },
+  dm: { label: 'Na DM, só o infrator vê', emoji: '📩' },
 });
+
+/**
+ * Quanto tempo o aviso no canal fica no ar. `0` = fica para sempre.
+ *
+ * O padrão é ficar: apagar o próprio recado sozinho é o tipo de coisa que
+ * ninguém pediu e que ninguém consegue reler depois. Quem quiser o canal limpo
+ * escolhe um prazo aqui.
+ */
+const NOTICE_TTL_CHOICES = Object.freeze([
+  Object.freeze({ ms: 0, label: 'Não apagar (padrão)', emoji: '📌' }),
+  Object.freeze({ ms: 5_000, label: 'Apagar em 5 segundos', emoji: '⏱️' }),
+  Object.freeze({ ms: 10_000, label: 'Apagar em 10 segundos', emoji: '⏱️' }),
+  Object.freeze({ ms: 30_000, label: 'Apagar em 30 segundos', emoji: '⏱️' }),
+  Object.freeze({ ms: 60_000, label: 'Apagar em 1 minuto', emoji: '⏳' }),
+  Object.freeze({ ms: 300_000, label: 'Apagar em 5 minutos', emoji: '⏳' }),
+  Object.freeze({ ms: 900_000, label: 'Apagar em 15 minutos', emoji: '⏳' }),
+]);
+
+/** Teto do prazo. Acima disto o `setTimeout` viraria uma promessa vaga. */
+const MAX_NOTICE_TTL_MS = 900_000;
+
+/** Piso quando há prazo: menos que isto ninguém termina de ler. */
+const MIN_NOTICE_TTL_MS = 3_000;
 
 /** Duração padrão do mute quando a regra ou a escada pede silenciamento. */
 const DEFAULT_MUTE_MS = 10 * 60 * 1000;
@@ -51,6 +80,7 @@ const BASE_DEFAULTS = Object.freeze({
   muteMs: DEFAULT_MUTE_MS,
   points: 1,
   notify: 'channel',
+  noticeTtlMs: 0,
   exemptRoleIds: [],
   exemptChannelIds: [],
 });
@@ -275,6 +305,9 @@ module.exports = {
   FAMILIES,
   ACTIONS,
   NOTIFY_MODES,
+  NOTICE_TTL_CHOICES,
+  MAX_NOTICE_TTL_MS,
+  MIN_NOTICE_TTL_MS,
   DEFAULT_MUTE_MS,
   BASE_DEFAULTS,
   RULES,

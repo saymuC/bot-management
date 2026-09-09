@@ -29,7 +29,7 @@ const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
 const { TEXT_CHANNEL_TYPES } = require('../utils/channelPerms');
 const { formatDuration } = require('../utils/time');
 const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
-const { RULES, RULE_KEYS, FAMILIES, ACTIONS, NOTIFY_MODES } = require('../config/automodRules');
+const { RULES, RULE_KEYS, FAMILIES, ACTIONS, NOTIFY_MODES, NOTICE_TTL_CHOICES } = require('../config/automodRules');
 const {
   MAX_POINTS,
   MAX_MUTE_MS,
@@ -209,6 +209,18 @@ const homeFor = (interaction, config, notice = '') =>
 
 // ----------------------------------------------------------------- tela: regra
 
+/** Prazo do aviso em texto legível. `0` é "fica", não "zero segundos". */
+const describeNoticeTtl = (ms) => (ms > 0 ? `⏱️ apaga em ${formatDuration(ms)}` : '📌 até alguém apagar');
+
+/**
+ * Rótulo curto do prazo, para o placeholder do select.
+ *
+ * Cai no `formatDuration` quando o valor salvo não é uma das opções — config de
+ * uma versão anterior do catálogo não deve virar placeholder vazio.
+ */
+const ttlLabel = (ms) =>
+  NOTICE_TTL_CHOICES.find((choice) => choice.ms === ms)?.label ?? `apaga em ${formatDuration(ms)}`;
+
 /** Valor de um limite em texto legível. */
 function describeLimit(field, value) {
   if (field.type === 'bool') return value ? 'sim' : 'não';
@@ -232,6 +244,12 @@ function ruleEmbed(key, config, guild) {
     { name: 'Duração do mute', value: rule.action === 'mute' ? formatDuration(rule.muteMs) : '—', inline: true },
     { name: 'Pontos', value: `${rule.points}`, inline: true },
     { name: 'Aviso', value: `${NOTIFY_MODES[rule.notify].emoji} ${NOTIFY_MODES[rule.notify].label}`, inline: true },
+    {
+      name: 'Aviso fica no ar',
+      // Só o aviso no canal tem prazo: a DM é do usuário, o bot não a apaga.
+      value: rule.notify === 'channel' ? describeNoticeTtl(rule.noticeTtlMs) : '—',
+      inline: true,
+    },
     {
       name: 'Isenções desta regra',
       value:
@@ -332,6 +350,28 @@ function ruleComponents(key, config) {
       )
   );
 
+  // Quinta e última linha permitida pelo Discord. Fica desabilitada quando não há
+  // aviso no canal para cronometrar, em vez de sumir: some daria a impressão de
+  // que a opção não existe.
+  const ttlRow = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`${PREFIX}ttl:${key}`)
+      .setPlaceholder(
+        rule.notify === 'channel'
+          ? `⏱️ Aviso no canal — atual: ${ttlLabel(rule.noticeTtlMs)}`
+          : '⏱️ Prazo do aviso — só vale com o aviso no canal'
+      )
+      .setDisabled(rule.notify !== 'channel')
+      .addOptions(
+        NOTICE_TTL_CHOICES.map((choice) => ({
+          label: choice.label,
+          value: String(choice.ms),
+          emoji: choice.emoji,
+          default: choice.ms === rule.noticeTtlMs,
+        }))
+      )
+  );
+
   const buttons = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`${PREFIX}toggle:${key}`)
@@ -359,7 +399,7 @@ function ruleComponents(key, config) {
     new ButtonBuilder().setCustomId(`${PREFIX}home`).setLabel('Voltar').setEmoji('◀️').setStyle(ButtonStyle.Secondary)
   );
 
-  return [actionRow, pointsRow, notifyRow, buttons];
+  return [actionRow, pointsRow, notifyRow, ttlRow, buttons];
 }
 
 const rulePayload = (key, config, guild, notice = '') => ({
@@ -723,6 +763,17 @@ async function routeAutomodSetup(interaction) {
       return saveRule(interaction, key, { points: Number(interaction.values[0]) }, `🎯 ${interaction.values[0]} ponto(s) por violação.`);
     case 'notify':
       return saveRule(interaction, key, { notify: interaction.values[0] }, `🔔 Aviso: ${NOTIFY_MODES[interaction.values[0]].label}.`);
+    case 'ttl': {
+      const ms = Number(interaction.values[0]);
+      return saveRule(
+        interaction,
+        key,
+        { noticeTtlMs: ms },
+        ms > 0
+          ? `⏱️ O aviso no canal se apaga em ${formatDuration(ms)}.`
+          : '📌 O aviso no canal fica no ar até alguém apagar.'
+      );
+    }
     case 'limits':
       return showLimitsModal(interaction, key, config);
     case 'mlimits':

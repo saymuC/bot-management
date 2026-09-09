@@ -18,9 +18,6 @@ const { MAX_MUTE_MS } = require('./config');
 const { recordInfraction, activePoints, ladderStep } = require('./infractions');
 const { forgetUser } = require('./tracker');
 
-/** Quanto tempo o aviso no canal fica visível antes de se apagar. */
-const NOTICE_TTL_MS = 8000;
-
 /** Um aviso por usuário+canal nesta janela: num flood de 20 mensagens, 1 aviso. */
 const NOTICE_COOLDOWN_MS = 10000;
 
@@ -74,7 +71,13 @@ async function deleteMessage(message, rule) {
   return message.delete().then(() => true).catch(() => false);
 }
 
-/** Avisa o infrator, no canal (com autodestruição) ou na DM. */
+/**
+ * Avisa o infrator: no canal, onde todos veem, ou na DM, onde só ele vê.
+ *
+ * O aviso no canal **não se apaga sozinho** a menos que a regra tenha um prazo
+ * configurado (`noticeTtlMs`). O padrão é ficar: uma mensagem que desaparece sem
+ * ninguém ter pedido não dá para reler nem para conferir depois.
+ */
 async function notify(message, rule, text) {
   if (rule.notify === 'none') return;
 
@@ -90,7 +93,9 @@ async function notify(message, rule, text) {
     .send({ content: `${message.author}, ${text}`, allowedMentions: { users: [message.author.id] } })
     .catch(() => null);
 
-  if (sent) setTimeout(() => sent.delete().catch(() => {}), NOTICE_TTL_MS).unref?.();
+  if (sent && rule.noticeTtlMs > 0) {
+    setTimeout(() => sent.delete().catch(() => {}), rule.noticeTtlMs).unref?.();
+  }
 }
 
 /**
@@ -224,7 +229,6 @@ async function enforce(message, violation, config) {
 }
 
 module.exports = {
-  NOTICE_TTL_MS,
   NOTICE_COOLDOWN_MS,
   canNotify,
   automodLog,

@@ -7,7 +7,16 @@
  */
 
 const { getGuildConfig, setGuildConfig } = require('../../database/db');
-const { RULES, RULE_KEYS, ACTIONS, NOTIFY_MODES, DEFAULT_MUTE_MS, ruleDefaults } = require('../../config/automodRules');
+const {
+  RULES,
+  RULE_KEYS,
+  ACTIONS,
+  NOTIFY_MODES,
+  DEFAULT_MUTE_MS,
+  MAX_NOTICE_TTL_MS,
+  MIN_NOTICE_TTL_MS,
+  ruleDefaults,
+} = require('../../config/automodRules');
 
 /** Teto do timeout do Discord: 28 dias. */
 const MAX_MUTE_MS = 28 * 24 * 60 * 60 * 1000;
@@ -80,6 +89,18 @@ function normalizeLimits(ruleKey, raw) {
   );
 }
 
+/**
+ * Prazo do aviso no canal, em ms. `0` significa "não apagar" e é um valor
+ * legítimo, não ausência — por isso ele não passa pelo `clampInt` comum, que
+ * empurraria o zero para o piso.
+ */
+function normalizeNoticeTtl(raw, fallback) {
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value) || value < 0) return fallback;
+  if (value === 0) return 0;
+  return Math.min(MAX_NOTICE_TTL_MS, Math.max(MIN_NOTICE_TTL_MS, value));
+}
+
 /** Uma regra normalizada: defaults do catálogo com as sobrescritas válidas por cima. */
 function normalizeRule(ruleKey, raw) {
   const defaults = ruleDefaults(ruleKey);
@@ -92,6 +113,7 @@ function normalizeRule(ruleKey, raw) {
     muteMs: clampInt(source.muteMs, { min: 5000, max: MAX_MUTE_MS, default: defaults.muteMs }),
     points: clampInt(source.points, { min: 0, max: MAX_POINTS, default: defaults.points }),
     notify: Object.hasOwn(NOTIFY_MODES, source.notify) ? source.notify : defaults.notify,
+    noticeTtlMs: normalizeNoticeTtl(source.noticeTtlMs, defaults.noticeTtlMs),
     exemptRoleIds: normalizeIds(source.exemptRoleIds),
     exemptChannelIds: normalizeIds(source.exemptChannelIds),
     limits: normalizeLimits(ruleKey, source.limits),
@@ -223,6 +245,7 @@ module.exports = {
   normalizeBool,
   normalizeList,
   normalizeLimits,
+  normalizeNoticeTtl,
   normalizeLadder,
   normalizeConfig,
   getAutomodConfig,

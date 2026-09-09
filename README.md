@@ -98,7 +98,7 @@ O motor roda **no próprio bot**, não no AutoMod nativo do Discord. Em troca de
 `/automod` abre o painel (sem parâmetros). Tudo é salvo na hora, sem botão "salvar". São três telas:
 
 - **Início** — menu com as 19 regras (✅/▫️ indicando ligada), select do canal de logs do AutoMod e os botões `[Ligar/Desligar o AutoMod] [Isenções globais] [Escada] [Isentar mods: sim/não] [Fechar]`. O resumo destaca as regras **ligadas mas sem efeito** (sem apagar, sem ação e sem pontos) — é o erro de configuração mais fácil de cometer.
-- **Regra** — select da ação imediata, select de pontos (0–10) e os botões `[Ligar/Desligar] [Limites…] [Isenções] [Voltar] [Fechar]`. "Limites…" abre um modal com os campos daquela regra; listas (palavras, domínios, extensões) vêm uma por linha.
+- **Regra** — quatro selects (ação imediata, pontos de 0–10, quem vê o aviso, quanto tempo o aviso fica) e os botões `[Ligar/Desligar] [Apagar: sim/não] [Limites…] [Isenções] [Voltar]`. "Limites…" abre um modal com os campos daquela regra; listas (palavras, domínios, extensões) vêm uma por linha.
 - **Isenções** — `RoleSelect` + `ChannelSelect` (múltiplos), tanto no escopo global quanto por regra.
 
 O AutoMod só age depois de `[Ligar o AutoMod]`: ligar uma regra sozinha não basta, o que permite configurar tudo com calma antes de valer.
@@ -133,7 +133,7 @@ A edição de mensagem também passa pelo filtro (senão a burla seria mandar "o
 
 ### Ação imediata, pontos e escada
 
-Cada regra tem, de forma independente: apagar a mensagem (sim/não), uma **ação imediata** (nenhuma, advertir, silenciar, expulsar, banir), duração do mute, quantos **pontos** vale (0–10) e para onde vai o aviso (não avisar, no canal com autodestruição, ou na DM).
+Cada regra tem, de forma independente: apagar a mensagem (sim/não), uma **ação imediata** (nenhuma, advertir, silenciar, expulsar, banir), duração do mute, quantos **pontos** vale (0–10) e como o infrator é avisado (ver abaixo).
 
 Os pontos alimentam a **escada**, configurada no botão `[Escada]` com um degrau por linha:
 
@@ -165,7 +165,15 @@ O que **não** é desfeito: expulsão (não há o que desfazer — o membro só 
 
 A ação `Advertir` grava na mesma tabela do `/warn`, com o bot como moderador, então `/warnings` continua contando a história inteira. Mute respeita o teto de 28 dias do Discord; mute, kick e ban conferem a hierarquia antes (`moderatable`, `kickable`, `bannable`) e, quando o bot não alcança o membro, isso vira uma linha no log em vez de uma exceção engolida.
 
-Num flood de 20 mensagens o bot apaga as 20 e **avisa uma vez** (cooldown de aviso por usuário e canal) — sem isso o remédio viraria o spam. Todo aviso vai com `allowedMentions` restrito.
+### Aviso ao infrator
+
+Duas escolhas independentes, por regra, nos dois selects de baixo do painel:
+
+**Quem vê** — `Não avisar`, `No canal, todos veem` (padrão) ou `Na DM, só o infrator vê`. Não existe um terceiro alcance: uma mensagem comum de bot não pode ser efêmera, então "só ele vê" no Discord é a DM, não um recado invisível no canal.
+
+**Quanto tempo fica** — `Não apagar` (padrão), ou um prazo de 5 s a 15 min. **O aviso no canal não se apaga sozinho** a menos que você escolha um prazo: uma mensagem que desaparece sem ninguém ter pedido não dá para reler nem para conferir depois. O select fica desabilitado quando o aviso vai para a DM ou está desligado — a DM é do usuário e o bot não a apaga.
+
+Num flood de 20 mensagens o bot apaga as 20 e **avisa uma vez** (cooldown de aviso por usuário e canal) — sem isso o remédio viraria o spam. Todo aviso vai com `allowedMentions` restrito. Regras de flood vêm com o aviso na DM por padrão, justamente para não somar barulho ao barulho.
 
 ### Isenções
 
