@@ -63,7 +63,7 @@ São 28 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 | Comando | O que faz | Permissão |
 |---|---|---|
 | `/say mensagem canal` | Envia uma mensagem pelo bot | Gerenciar mensagens |
-| `/embed titulo descricao canal cor anexo midia_url rodape` | Cria um embed com pré-visualização antes de enviar | Gerenciar mensagens |
+| `/embed titulo descricao canal cor anexo midia_url miniatura miniatura_url rodape` | Cria um embed com pré-visualização antes de enviar (imagem grande + miniatura no canto) | Gerenciar mensagens |
 | `/nuke confirmar` | Recria o canal atual do zero (apaga todas as mensagens) | Gerenciar canais |
 | `/ping` | Latência do gateway, tempo de resposta e uptime | Todos |
 

@@ -28,15 +28,36 @@ const { POST_EMBED_PERMS_LABEL, TEXT_CHANNEL_TYPES, canPostEmbed, resolveTextCha
 
 const PREFIX = 'embedp_';
 
-const EMPTY_MEDIA = Object.freeze({
+/** Valor do select de cor que abre o modal de hex livre. */
+const HEX_OPTION = 'hexlivre';
+
+/** Mídia principal: imagem grande do embed, anexo de arquivo e link no corpo. */
+const EMPTY_IMAGE = Object.freeze({
   imageUrl: null,
   imageAttachment: null,
   fileAttachment: null,
   linkContent: null,
 });
 
+/** Miniatura: imagem pequena no canto superior direito do embed. */
+const EMPTY_THUMB = Object.freeze({
+  thumbnailUrl: null,
+  thumbnailAttachment: null,
+});
+
+/** Zera toda a mídia do rascunho (imagem grande + miniatura). */
+const EMPTY_MEDIA = Object.freeze({ ...EMPTY_IMAGE, ...EMPTY_THUMB });
+
 /** @returns {boolean} true se o rascunho tem alguma mídia associada. */
-const hasMedia = (draft) => Boolean(draft.imageUrl || draft.imageAttachment || draft.fileAttachment || draft.linkContent);
+const hasMedia = (draft) =>
+  Boolean(
+    draft.imageUrl ||
+      draft.imageAttachment ||
+      draft.fileAttachment ||
+      draft.linkContent ||
+      draft.thumbnailUrl ||
+      draft.thumbnailAttachment
+  );
 
 /**
  * Acka a interação tolerando o erro 10062 ("Unknown interaction").
@@ -92,20 +113,24 @@ function previewComponents(draft) {
       new StringSelectMenuBuilder()
         .setCustomId(`${PREFIX}color_${draft.id}`)
         .setPlaceholder(`🎨 Cor do embed — atual: ${describeColor(draft.colorHex)}`)
-        .addOptions(colorSelectOptions(draft.colorHex))
+        .addOptions([
+          ...colorSelectOptions(draft.colorHex),
+          { label: 'Hex personalizado…', value: HEX_OPTION, emoji: '✏️', description: 'Informar um código como #5865F2' },
+        ])
     ),
     new ActionRowBuilder().addComponents(actions),
   ];
 }
 
 /** Monta o embed conforme o rascunho (usado no preview e no envio final). */
-function draftEmbed(draft, image) {
+function draftEmbed(draft, image, thumbnail) {
   return baseEmbed({
     title: draft.title,
     description: draft.description,
     color: resolveColor(draft.colorHex) ?? undefined,
     footer: draft.footer || undefined,
     image,
+    thumbnail,
   });
 }
 
@@ -127,7 +152,7 @@ function buildPreviewPayload(draft, extraNotice = '') {
 
   return {
     content: lines.join('\n'),
-    embeds: [draftEmbed(draft, draft.imageUrl ?? undefined)],
+    embeds: [draftEmbed(draft, draft.imageUrl ?? undefined, draft.thumbnailUrl ?? undefined)],
     components: previewComponents(draft),
     files: [],
   };
@@ -138,22 +163,34 @@ function buildPreviewPayload(draft, extraNotice = '') {
  *
  * Imagens vindas de anexo são reenviadas como arquivo e referenciadas via
  * `attachment://`, porque a URL do CDN do anexo original é assinada e expira.
+ * Nomes precisam ser únicos na mesma mensagem: imagem grande e miniatura podem
+ * ter subido com o mesmo nome, então o segundo anexo recebe um sufixo.
  */
 function buildFinalPayload(draft) {
   const files = [];
-  let image = draft.imageUrl ?? undefined;
+  const usedNames = new Set();
 
-  if (draft.imageAttachment) {
-    files.push(new AttachmentBuilder(draft.imageAttachment.url, { name: draft.imageAttachment.name }));
-    image = `attachment://${draft.imageAttachment.name}`;
-  }
-  if (draft.fileAttachment) {
-    files.push(new AttachmentBuilder(draft.fileAttachment.url, { name: draft.fileAttachment.name }));
-  }
+  /** Anexa o arquivo garantindo nome único e devolve a referência attachment://. */
+  const attach = ({ url, name }) => {
+    let unique = name;
+    for (let i = 2; usedNames.has(unique); i += 1) {
+      unique = name.replace(/(\.[^.]+)?$/, (ext) => `-${i}${ext ?? ''}`);
+    }
+    usedNames.add(unique);
+    files.push(new AttachmentBuilder(url, { name: unique }));
+    return `attachment://${unique}`;
+  };
+
+  let image = draft.imageUrl ?? undefined;
+  let thumbnail = draft.thumbnailUrl ?? undefined;
+
+  if (draft.imageAttachment) image = attach(draft.imageAttachment);
+  if (draft.thumbnailAttachment) thumbnail = attach(draft.thumbnailAttachment);
+  if (draft.fileAttachment) attach(draft.fileAttachment);
 
   return {
     content: draft.linkContent ?? undefined,
-    embeds: [draftEmbed(draft, image)],
+    embeds: [draftEmbed(draft, image, thumbnail)],
     files,
   };
 }
@@ -197,16 +234,66 @@ function handleDelete(interaction, draft) {
   );
 }
 
-/** Zera toda a mídia do rascunho (anexo, imagem e link). */
+/** Zera toda a mídia do rascunho (anexo, imagem grande, miniatura e link). */
 function handleClearMedia(interaction, draft) {
   const updated = updateDraft(draft.id, EMPTY_MEDIA);
   if (!updated) return replyExpired(interaction);
-  return safeAck(interaction, () => interaction.update(buildPreviewPayload(updated, '🚫 Mídia removida.')));
+  return safeAck(interaction, () =>
+    interaction.update(buildPreviewPayload(updated, '🚫 Mídia removida (imagem grande, miniatura e anexos).'))
+  );
+}
+
+/** Abre o modal de hex livre (opção "Hex personalizado" do seletor de cor). */
+function handleHexModal(interaction, draft) {
+  const modal = new ModalBuilder()
+    .setCustomId(`${PREFIX}hexmodal_${draft.id}`)
+    .setTitle('Cor personalizada')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('cor')
+          .setLabel('Cor: nome da paleta ou hex')
+          .setPlaceholder('azul, fucsia... ou #5865F2')
+          .setStyle(TextInputStyle.Short)
+          .setMaxLength(30)
+          .setRequired(false)
+          .setValue(draft.colorHex ?? '')
+      )
+    );
+
+  return interaction.showModal(modal).catch((err) => {
+    if (err.code === 10062) {
+      console.warn('[embed] Modal de cor não abriu: interação expirada.');
+      return undefined;
+    }
+    throw err;
+  });
+}
+
+/** Aplica o hex/nome digitado no modal de cor personalizada. */
+function handleHexSubmit(interaction, draft) {
+  const colorRaw = interaction.fields.getTextInputValue('cor').trim();
+
+  if (colorRaw && resolveColor(colorRaw) === null) {
+    return safeAck(interaction, () =>
+      interaction.update(
+        buildPreviewPayload(draft, '⚠️ Cor não reconhecida (use um nome como `azul` ou um hex `#5865F2`) — a cor anterior foi mantida.')
+      )
+    );
+  }
+
+  const updated = updateDraft(draft.id, { colorHex: colorRaw || null });
+  if (!updated) return replyExpired(interaction);
+  return safeAck(interaction, () =>
+    interaction.update(buildPreviewPayload(updated, `🎨 Cor alterada para ${describeColor(updated.colorHex)}.`))
+  );
 }
 
 /** Troca a cor do embed pela paleta nomeada. */
 function handleColorSelect(interaction, draft) {
   const colorHex = interaction.values[0];
+  if (colorHex === HEX_OPTION) return handleHexModal(interaction, draft);
+
   const updated = updateDraft(draft.id, { colorHex });
   if (!updated) return replyExpired(interaction);
   return safeAck(interaction, () =>
@@ -236,7 +323,11 @@ async function handleChannelSelect(interaction, draft) {
 function handleEdit(interaction, draft) {
   const mediaValue = draft.imageAttachment || draft.fileAttachment ? '' : draft.imageUrl ?? draft.linkContent ?? '';
   const anexoAviso = draft.imageAttachment || draft.fileAttachment ? 'Preencher aqui substitui o anexo enviado' : 'https://...';
+  const thumbValue = draft.thumbnailAttachment ? '' : draft.thumbnailUrl ?? '';
+  const thumbAviso = draft.thumbnailAttachment ? 'Preencher aqui substitui a miniatura enviada' : 'https://... (imagem pequena)';
 
+  // O modal do Discord aceita no máximo 5 campos; a cor fica de fora porque o
+  // preview já tem o seletor 🎨 (com a opção de hex personalizado).
   const inputs = [
     new TextInputBuilder()
       .setCustomId('titulo')
@@ -253,21 +344,21 @@ function handleEdit(interaction, draft) {
       .setRequired(true)
       .setValue(draft.description),
     new TextInputBuilder()
-      .setCustomId('cor')
-      .setLabel('Cor: nome ou hex')
-      .setPlaceholder('azul, verde, fucsia... ou #5865F2 (ou use o seletor 🎨)')
-      .setStyle(TextInputStyle.Short)
-      .setMaxLength(30)
-      .setRequired(false)
-      .setValue(draft.colorHex ?? ''),
-    new TextInputBuilder()
       .setCustomId('midia_url')
-      .setLabel('Link de imagem/GIF/vídeo')
+      .setLabel('Imagem grande: link de imagem/GIF/vídeo')
       .setPlaceholder(anexoAviso)
       .setStyle(TextInputStyle.Short)
       .setMaxLength(500)
       .setRequired(false)
       .setValue(mediaValue),
+    new TextInputBuilder()
+      .setCustomId('miniatura_url')
+      .setLabel('Miniatura: link da imagem pequena (canto)')
+      .setPlaceholder(thumbAviso)
+      .setStyle(TextInputStyle.Short)
+      .setMaxLength(500)
+      .setRequired(false)
+      .setValue(thumbValue),
     new TextInputBuilder()
       .setCustomId('rodape')
       .setLabel('Rodapé (opcional)')
@@ -309,7 +400,7 @@ function resolveEditedMedia(draft, mediaRaw, warnings) {
 
   if (!mediaRaw) {
     return {
-      ...EMPTY_MEDIA,
+      ...EMPTY_IMAGE,
       imageAttachment: previous.imageAttachment,
       imageUrl: previous.imageAttachment ? previous.imageUrl : null,
       fileAttachment: previous.fileAttachment,
@@ -322,31 +413,50 @@ function resolveEditedMedia(draft, mediaRaw, warnings) {
     return previous;
   }
   return classified.kind === 'image'
-    ? { ...EMPTY_MEDIA, imageUrl: classified.url }
-    : { ...EMPTY_MEDIA, linkContent: classified.url };
+    ? { ...EMPTY_IMAGE, imageUrl: classified.url }
+    : { ...EMPTY_IMAGE, linkContent: classified.url };
+}
+
+/**
+ * Resolve a miniatura após a edição no modal.
+ *
+ * Miniatura só aceita imagem (o embed não renderiza vídeo nesse campo).
+ * Campo vazio preserva a miniatura vinda de anexo e limpa a vinda de link.
+ * @param {string[]} warnings acumulador de avisos exibidos ao autor.
+ */
+function resolveEditedThumbnail(draft, thumbRaw, warnings) {
+  const previous = {
+    thumbnailUrl: draft.thumbnailUrl ?? null,
+    thumbnailAttachment: draft.thumbnailAttachment ?? null,
+  };
+
+  if (!thumbRaw) {
+    return previous.thumbnailAttachment ? previous : EMPTY_THUMB;
+  }
+
+  const classified = classifyUrl(thumbRaw);
+  if (!classified) {
+    warnings.push('Link da miniatura inválido (use uma URL `http(s)://`) — a miniatura anterior foi mantida.');
+    return previous;
+  }
+  if (classified.kind !== 'image') {
+    warnings.push('A miniatura aceita apenas imagem ou GIF (vídeos e links de plataformas não renderizam) — a anterior foi mantida.');
+    return previous;
+  }
+  return { ...EMPTY_THUMB, thumbnailUrl: classified.url };
 }
 
 async function handleModalSubmit(interaction, draft) {
   const title = interaction.fields.getTextInputValue('titulo').trim();
   const description = interaction.fields.getTextInputValue('descricao').replaceAll('\\n', '\n');
-  const colorRaw = interaction.fields.getTextInputValue('cor').trim();
   const mediaRaw = interaction.fields.getTextInputValue('midia_url').trim();
+  const thumbRaw = interaction.fields.getTextInputValue('miniatura_url').trim();
   const footer = interaction.fields.getTextInputValue('rodape').trim();
 
   const warnings = [];
-
-  let colorHex = null;
-  if (colorRaw) {
-    if (resolveColor(colorRaw) === null) {
-      warnings.push('Cor não reconhecida (use um nome como `azul` ou um hex `#5865F2`) — a cor anterior foi mantida.');
-      colorHex = draft.colorHex ?? null;
-    } else {
-      colorHex = colorRaw;
-    }
-  }
-
   const media = resolveEditedMedia(draft, mediaRaw, warnings);
-  const updated = updateDraft(draft.id, { title, description, colorHex, footer: footer || null, ...media });
+  const thumbnail = resolveEditedThumbnail(draft, thumbRaw, warnings);
+  const updated = updateDraft(draft.id, { title, description, footer: footer || null, ...media, ...thumbnail });
   if (!updated) return replyExpired(interaction);
 
   if (!(await safeAck(interaction, () => interaction.update(buildPreviewPayload(updated))))) return undefined;
@@ -410,6 +520,8 @@ async function routeEmbedInteraction(interaction) {
       return handleColorSelect(interaction, draft);
     case 'modal':
       return handleModalSubmit(interaction, draft);
+    case 'hexmodal':
+      return handleHexSubmit(interaction, draft);
     default:
       return undefined;
   }

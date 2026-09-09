@@ -19,6 +19,34 @@ function mediaFromAttachment(attachment) {
   return { ...EMPTY_MEDIA, fileAttachment: { url, name } };
 }
 
+/**
+ * Resolve a miniatura (imagem pequena no canto do embed) a partir do anexo ou do link.
+ *
+ * Só imagem/GIF serve: o campo thumbnail do embed não renderiza vídeo nem
+ * desdobra links de plataformas. O anexo tem precedência sobre o link.
+ * @returns {{ thumbnailUrl: string|null, thumbnailAttachment: object|null }|{ error: string }}
+ */
+function resolveThumbnail(attachment, urlRaw) {
+  if (attachment) {
+    const { kind, url, name } = classifyAttachment(attachment);
+    if (kind !== 'image') {
+      return { error: 'A miniatura aceita apenas imagem ou GIF. Para vídeos, use o campo `anexo`.' };
+    }
+    return { thumbnailUrl: url, thumbnailAttachment: { url, name } };
+  }
+
+  if (!urlRaw) return { thumbnailUrl: null, thumbnailAttachment: null };
+
+  const classified = classifyUrl(urlRaw);
+  if (!classified) {
+    return { error: 'Link da miniatura inválido. Use uma URL começando com `http://` ou `https://`.' };
+  }
+  if (classified.kind !== 'image') {
+    return { error: 'A miniatura aceita apenas imagem ou GIF (vídeos e links de plataformas não renderizam nesse campo).' };
+  }
+  return { thumbnailUrl: classified.url, thumbnailAttachment: null };
+}
+
 module.exports = {
   ephemeral: true,
   data: new SlashCommandBuilder()
@@ -41,10 +69,16 @@ module.exports = {
         .setAutocomplete(true)
     )
     .addAttachmentOption((opt) =>
-      opt.setName('anexo').setDescription('Arquivo de imagem, GIF ou vídeo para acompanhar o embed')
+      opt.setName('anexo').setDescription('Imagem grande: arquivo de imagem, GIF ou vídeo')
     )
     .addStringOption((opt) =>
-      opt.setName('midia_url').setDescription('Link de imagem, GIF ou vídeo (alternativa ao anexo)')
+      opt.setName('midia_url').setDescription('Imagem grande: link de imagem, GIF ou vídeo (alternativa ao anexo)')
+    )
+    .addAttachmentOption((opt) =>
+      opt.setName('miniatura').setDescription('Miniatura: imagem pequena no canto superior direito do embed')
+    )
+    .addStringOption((opt) =>
+      opt.setName('miniatura_url').setDescription('Miniatura: link da imagem pequena (alternativa ao anexo)')
     )
     .addStringOption((opt) => opt.setName('rodape').setDescription('Texto pequeno no pé do embed').setMaxLength(2048)),
 
@@ -61,6 +95,8 @@ module.exports = {
     const colorRaw = interaction.options.getString('cor');
     const attachment = interaction.options.getAttachment('anexo');
     const mediaUrlRaw = interaction.options.getString('midia_url');
+    const thumbAttachment = interaction.options.getAttachment('miniatura');
+    const thumbUrlRaw = interaction.options.getString('miniatura_url');
     const footer = interaction.options.getString('rodape');
 
     if (colorRaw && resolveColor(colorRaw) === null) {
@@ -94,6 +130,11 @@ module.exports = {
           : { ...EMPTY_MEDIA, linkContent: classified.url };
     }
 
+    const thumbnail = resolveThumbnail(thumbAttachment, thumbUrlRaw);
+    if (thumbnail.error) {
+      return respond(interaction, { embeds: [errorEmbed(thumbnail.error)] });
+    }
+
     const draftId = createDraft({
       userId: interaction.user.id,
       guildId: interaction.guild.id,
@@ -103,9 +144,12 @@ module.exports = {
       colorHex: colorRaw ?? null,
       footer: footer ?? null,
       ...media,
+      ...thumbnail,
     });
 
-    const notice = attachment && mediaUrlRaw ? 'ℹ️ Você enviou anexo e link: o anexo foi usado e o link ignorado.' : '';
-    return respond(interaction, buildPreviewPayload(getDraft(draftId), notice));
+    const notices = [];
+    if (attachment && mediaUrlRaw) notices.push('ℹ️ Você enviou anexo e link: o anexo foi usado e o link ignorado.');
+    if (thumbAttachment && thumbUrlRaw) notices.push('ℹ️ Miniatura: o anexo foi usado e o link ignorado.');
+    return respond(interaction, buildPreviewPayload(getDraft(draftId), notices.join('\n')));
   },
 };
