@@ -150,6 +150,34 @@ function paintBackground(ctx, { width, height, image }) {
   ctx.fillRect(0, 0, width, height);
 }
 
+/**
+ * Escurece as duas pontas da imagem, atrás do cabeçalho e do rodapé.
+ *
+ * Chamado depois de `paintBackground` e antes de qualquer texto. Sem isto, o véu
+ * teria de ser denso o bastante para o pior fundo possível — e aí todo fundo bom
+ * pagaria por isso.
+ *
+ * @param {Ctx} ctx
+ * @param {{ width: number, height: number, top: number, bottom: number }} options
+ */
+function paintEdgeScrims(ctx, { width, height, top, bottom }) {
+  if (top > 0) {
+    const gradient = ctx.createLinearGradient(0, 0, 0, top);
+    gradient.addColorStop(0, COLORS.scrim);
+    gradient.addColorStop(1, 'rgba(9, 10, 13, 0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, top);
+  }
+
+  if (bottom > 0) {
+    const gradient = ctx.createLinearGradient(0, height - bottom, 0, height);
+    gradient.addColorStop(0, 'rgba(9, 10, 13, 0)');
+    gradient.addColorStop(1, COLORS.scrim);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, height - bottom, width, bottom);
+  }
+}
+
 module.exports = {
   BACKGROUND_TTL_MS,
   BACKGROUND_MAX_ENTRIES,
@@ -158,4 +186,5 @@ module.exports = {
   loadBackgroundImage,
   drawGeneratedBackground,
   paintBackground,
+  paintEdgeScrims,
 };

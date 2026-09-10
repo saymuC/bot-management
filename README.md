@@ -315,13 +315,17 @@ Os dois respondem com uma **imagem gerada pelo bot**: fundo escuro, avatar circu
 
 `/rank` é **só leitura**: consultar alguém que nunca falou não cria registro nem coloca a pessoa no ranking. O card traz nível, XP no nível atual, XP total, barra e posição no servidor (a posição só aparece para quem tem XP). Com o sistema desligado ele responde e avisa disso.
 
-`/top` desenha 10 por página, com o primeiro lugar num card claro e mais alto, número em dourado/prata/bronze nas três primeiras posições e a página no cabeçalho. Os botões de navegação **trocam a imagem** — cada página é um anexo novo, com a página no nome do arquivo para o cliente do Discord não reusar a anterior em cache. Uma última página incompleta sai mais curta, sem espaço vazio.
+A tipografia das duas imagens é a **Klee One**, que viaja com o projeto em `assets/fonts/` (licença OFL, incluída no mesmo diretório) e é registrada no boot. Isso mantém o traço igual em qualquer host — e traz de graça a cobertura de japonês/CJK que as fontes latinas do sistema não têm. As fontes do sistema continuam entrando como reserva por glifo (emoji, árabe, tailandês).
+
+Cada posição é um **cartão de papel opaco** (claro, texto escuro), não um painel translúcido: assim a legibilidade do XP não depende da imagem de fundo que o servidor configurou.
+
+`/top` desenha 10 por página, com o primeiro lugar num card mais alto e mais claro, faixa lateral e selo da posição em dourado/prata/bronze nas três primeiras, e a página no cabeçalho. Os botões de navegação **trocam a imagem** — cada página é um anexo novo, com a página no nome do arquivo para o cliente do Discord não reusar a anterior em cache. Uma última página incompleta sai mais curta, sem espaço vazio.
 
 O desempate entre XP iguais é estável (por id), então ninguém aparece em duas páginas nem desaparece entre elas. Quem saiu do servidor continua no ranking marcado como `(saiu)` — o registro não é apagado em `guildMemberRemove`, e quem volta reencontra o progresso.
 
 Detalhes que só aparecem quando algo dá errado:
 
-- **Sem fonte no host** (container Linux enxuto sem pacote de fontes) o `@napi-rs/canvas` não registra família nenhuma e a imagem sairia em branco. Nesse caso os dois comandos caem no **embed de texto** automaticamente — o mesmo requisito do captcha da verificação, resolvido com `apt-get install fonts-dejavu-core`.
+- **Sem fonte alguma** (a Klee One embutida sumiu do repositório *e* o host não tem pacote de fontes) o `@napi-rs/canvas` não registra família nenhuma e a imagem sairia em branco. Nesse caso os dois comandos caem no **embed de texto** automaticamente. O captcha da verificação, que não usa a fonte embutida, continua exigindo fonte de sistema (`apt-get install fonts-dejavu-core`).
 - Avatar que não baixa vira um círculo com a inicial do nome, nunca um furo na linha. Qualquer falha no desenho também cai no embed, com log no console.
 - Páginas já desenhadas ficam ~60 s em cache, chaveadas pelo XP das linhas: ida e volta nos botões não redesenha nada, e XP novo invalida a imagem sozinho.
 
@@ -478,7 +482,8 @@ Se você preencher `CLIENT_SECRET`, `OAUTH_REDIRECT_URI` e `OAUTH_PORT` no `.env
 - `config/levels.js` — teto de nível, faixas aceitas, modos de recompensa e padrões do sistema de níveis
 - `utils/automod/` — `config.js` (JSON normalizado + isenções) · `textNormalize.js` (desdisfarce) · `wildcard.js` (curinga `*` sem regex do usuário) · `tracker.js` (janelas em memória) · `infractions.js` (pontos e escada) · `enforce.js` (ações e log) · `raid.js` · `detectors/` (`excess` · `media` · `links` · `words` · `flood`)
 - `utils/levels/card/` — o desenho das imagens: `theme.js` (medidas e paleta) · `primitives.js` (retângulo, avatar, barra, corte de texto) · `background.js` (fundo gerado e o remoto em cache) · `avatars.js` (download em paralelo com reserva) · `leaderboardCard.js` (página do `/top`) · `rankCard.js` (card do `/rank`) · `cache.js` (TTL + teto)
-- `utils/canvasFonts.js` — descoberta das fontes do sistema e a cadeia de reserva por glifo (emoji, CJK), compartilhada pelo card e pelo captcha
+- `utils/canvasFonts.js` — registro da fonte embutida, descoberta das fontes do sistema e a cadeia de reserva por glifo (emoji, CJK), compartilhada pelo card e pelo captcha
+- `assets/fonts/` — Klee One (Regular e SemiBold) usada nas imagens do ranking, com a licença OFL ao lado
 - `utils/remoteImage.js` — download validado de imagem remota (https, host público, teto de bytes), usado pelo `/emoji-add` e pelo fundo do ranking
 - `utils/levels/` — `formula.js` (nível derivado do XP) · `config.js` (JSON normalizado + exclusões) · `repository.js` (statements preparados) · `service.js` (alteração transacional) · `antiFarm.js` (elegibilidade do conteúdo) · `tracker.js` (cooldown e repetição em memória) · `rewards.js` (reconciliação de cargos) · `leaderboard.js` (formatação) · `adminAction.js` (corpo comum dos comandos de XP)
 - `test/automod.test.js` e `test/levels.*.test.js` — testes da lógica pura e de integração (`npm test`)

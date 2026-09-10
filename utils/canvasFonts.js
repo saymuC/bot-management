@@ -13,12 +13,58 @@
  * seria uma condição que nunca dá certo.
  */
 
+const path = require('node:path');
+const fs = require('node:fs');
 const { GlobalFonts } = require('@napi-rs/canvas');
+
+/**
+ * Fontes que viajam com o projeto, em `assets/fonts/`.
+ *
+ * A Klee One é a identidade das imagens do ranking, e depender de instalação no
+ * host seria depender de sorte: em container Debian ela não existe, e o card
+ * sairia com a fonte que sobrasse. Registrada daqui, o `/top` sai igual em
+ * qualquer máquina — e de graça vem a cobertura de japonês, que as fontes de
+ * sistema latinas não têm.
+ *
+ * O registro é feito uma vez, no carregamento do módulo. Falha não é fatal: sem a
+ * fonte embutida a descoberta abaixo continua achando uma do sistema.
+ */
+const STRONG_FAMILY = 'Klee One Semi';
+
+const BUNDLED_FONTS = Object.freeze([
+  { file: 'KleeOne-Regular.ttf', alias: 'Klee One' },
+  // O SemiBold entra com nome próprio, não como segundo peso do mesmo nome: o
+  // `bold` do `ctx.font` sobre a Klee One engorda o traço por conta própria e sai
+  // borrado. Com alias separado quem desenha escolhe o peso de verdade.
+  { file: 'KleeOne-SemiBold.ttf', alias: STRONG_FAMILY },
+]);
+
+/** @returns {string[]} aliases registrados com sucesso */
+function registerBundledFonts() {
+  const dir = path.join(__dirname, '..', 'assets', 'fonts');
+  const registered = [];
+
+  for (const { file, alias } of BUNDLED_FONTS) {
+    const full = path.join(dir, file);
+    try {
+      if (!fs.existsSync(full)) continue;
+      if (GlobalFonts.registerFromPath(full, alias)) registered.push(alias);
+    } catch (err) {
+      const motivo = err instanceof Error ? err.message : String(err);
+      console.error(`[fonts] não foi possível registrar ${file}:`, motivo);
+    }
+  }
+
+  return registered;
+}
+
+const BUNDLED_REGISTERED = registerBundledFonts();
 
 /** Preferência de cada papel, da mais desejada para a mais provável de existir. */
 const FAMILY_CANDIDATES = Object.freeze({
   /** Títulos: serifa, o traço do mockup do ranking. */
   display: Object.freeze([
+    'Klee One',
     'Georgia',
     'Palatino Linotype',
     'Book Antiqua',
@@ -27,8 +73,9 @@ const FAMILY_CANDIDATES = Object.freeze({
     'DejaVu Serif',
     'Liberation Serif',
   ]),
-  /** Corpo: sans legível em tamanho pequeno. */
+  /** Corpo: a mesma Klee One, com as sans do sistema como reserva. */
   body: Object.freeze([
+    'Klee One',
     'Segoe UI',
     'Inter',
     'Noto Sans',
@@ -119,12 +166,18 @@ function resolveFamilies(available = availableFamilies()) {
 /**
  * As famílias já no formato de `ctx.font`, com as reservas por glifo no fim.
  *
- * Devolve a lista pronta (`"Segoe UI", "Segoe UI Emoji", …`) em vez do nome
+ * Devolve a lista pronta (`"Klee One", "Segoe UI Emoji", …`) em vez do nome
  * simples justamente para quem monta a string não ter de lembrar de aspas nem de
  * fallback — o card usa isto, o captcha continua com o nome único.
  *
+ * `strong` + `weight` andam juntos e resolvem o mesmo problema por dois caminhos:
+ * com a Klee One embutida existe um peso mais forte de verdade e `weight` vem
+ * vazio; num host que só tem fonte de sistema, `strong` é a própria fonte de corpo
+ * e `weight` vira `'bold '`. Quem desenha escreve sempre
+ * `${weight}20px ${strong}` e não precisa saber em qual dos dois mundos está.
+ *
  * @param {Set<string>} [available]
- * @returns {FontFamilies|null}
+ * @returns {(FontFamilies & { strong: string, weight: string })|null}
  */
 function fontStacks(available = availableFamilies()) {
   const families = resolveFamilies(available);
@@ -133,10 +186,14 @@ function fontStacks(available = availableFamilies()) {
   const extras = FALLBACK_CANDIDATES.filter((family) => available.has(family));
   const stack = (...names) => [...new Set([...names, ...extras])].map((name) => `"${name}"`).join(', ');
 
+  const hasStrong = available.has(STRONG_FAMILY);
+
   return {
     display: stack(families.display, families.body),
     body: stack(families.body),
     mono: stack(families.mono, families.body),
+    strong: hasStrong ? stack(STRONG_FAMILY, families.body) : stack(families.body),
+    weight: hasStrong ? '' : 'bold ',
   };
 }
 
@@ -151,6 +208,8 @@ function checkCanvasFonts() {
 }
 
 module.exports = {
+  BUNDLED_FONTS,
+  BUNDLED_REGISTERED,
   FAMILY_CANDIDATES,
   FALLBACK_CANDIDATES,
   MISSING_REASON,

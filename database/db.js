@@ -4,6 +4,10 @@ const Database = require('better-sqlite3');
 const db = new Database(path.join(__dirname, 'bot.sqlite'));
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+// Espera pelo lock em vez de falhar de imediato com SQLITE_BUSY. Em WAL, leitura e
+// escrita convivem, mas duas escritas não: sem isto, dois processos no mesmo arquivo
+// (a suíte de testes roda os arquivos em paralelo) derrubam um deles na hora.
+db.pragma('busy_timeout = 5000');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS guild_config (

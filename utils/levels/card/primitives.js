@@ -38,22 +38,140 @@ function roundRectPath(ctx, x, y, width, height, radius) {
 }
 
 /**
- * Retângulo arredondado preenchido, com contorno opcional.
+ * Retângulo arredondado preenchido, com contorno e sombra opcionais.
+ *
+ * A sombra é aplicada só no preenchimento e desligada antes do contorno: sombra
+ * ligada num `stroke` desenha um segundo halo em cima do primeiro e o cartão fica
+ * com a borda suja.
  *
  * @param {Ctx} ctx
- * @param {{ x: number, y: number, width: number, height: number, radius: number, fill?: string|Gradient, stroke?: string }} options
+ * @param {{ x: number, y: number, width: number, height: number, radius: number, fill?: string|Gradient, stroke?: string, lineWidth?: number, shadow?: { color: string, blur: number, offsetY?: number } }} options
  */
-function fillRoundRect(ctx, { x, y, width, height, radius, fill, stroke }) {
-  roundRectPath(ctx, x, y, width, height, radius);
+function fillRoundRect(ctx, { x, y, width, height, radius, fill, stroke, lineWidth = 1, shadow }) {
   if (fill) {
+    ctx.save();
+    if (shadow) {
+      ctx.shadowColor = shadow.color;
+      ctx.shadowBlur = shadow.blur;
+      ctx.shadowOffsetY = shadow.offsetY ?? 0;
+    }
+    roundRectPath(ctx, x, y, width, height, radius);
     ctx.fillStyle = fill;
     ctx.fill();
+    ctx.restore();
   }
+
   if (stroke) {
-    ctx.lineWidth = 1;
+    roundRectPath(ctx, x, y, width, height, radius);
+    ctx.lineWidth = lineWidth;
     ctx.strokeStyle = stroke;
     ctx.stroke();
   }
+}
+
+/**
+ * Faixa de cor rente à borda esquerda de um cartão.
+ *
+ * Desenhada dentro do recorte do próprio cartão para acompanhar o arredondamento
+ * do canto em vez de vazar um retângulo reto por cima dele.
+ *
+ * @param {Ctx} ctx
+ * @param {{ x: number, y: number, width: number, height: number, radius: number, thickness: number, fill: string }} options
+ */
+function drawAccent(ctx, { x, y, width, height, radius, thickness, fill }) {
+  ctx.save();
+  roundRectPath(ctx, x, y, width, height, radius);
+  ctx.clip();
+  ctx.fillStyle = fill;
+  ctx.fillRect(x, y, thickness, height);
+  ctx.restore();
+}
+
+/**
+ * Hachura diagonal em cima de uma área, bem discreta.
+ *
+ * Serve para uma superfície grande e chapada não parecer um retângulo de cor —
+ * o degradê sozinho ainda lê como vazio. As linhas são desenhadas dentro de um
+ * recorte, então quem chama define a área exata.
+ *
+ * @param {Ctx} ctx
+ * @param {{ x: number, y: number, width: number, height: number, color: string, gap?: number, lineWidth?: number }} options
+ */
+function drawHatch(ctx, { x, y, width, height, color, gap = 18, lineWidth = 1 }) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, width, height);
+  ctx.clip();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+
+  ctx.beginPath();
+  for (let offset = -height; offset < width + height; offset += gap) {
+    ctx.moveTo(x + offset, y + height);
+    ctx.lineTo(x + offset + height, y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Círculo com um número dentro, para a posição no ranking.
+ *
+ * @param {Ctx} ctx
+ * @param {{ text: string, cx: number, cy: number, radius: number, font: string, fill: string, background: string, stroke?: string }} options
+ */
+function drawBadge(ctx, { text, cx, cy, radius, font, fill, background, stroke }) {
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fillStyle = background;
+  ctx.fill();
+  if (stroke) {
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = stroke;
+    ctx.stroke();
+  }
+
+  const align = ctx.textAlign;
+  const baseline = ctx.textBaseline;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = font;
+  ctx.fillStyle = fill;
+  ctx.fillText(text, cx, cy + 1);
+  ctx.textAlign = align;
+  ctx.textBaseline = baseline;
+}
+
+/**
+ * Cápsula com texto centralizado, para a página e a posição.
+ *
+ * Mede o texto e devolve a largura ocupada, porque quem chama normalmente precisa
+ * alinhar outra coisa ao lado — e medir duas vezes a mesma string é o tipo de
+ * duplicação que sai de sincronia na primeira mudança de fonte.
+ *
+ * @param {Ctx} ctx
+ * @param {{ text: string, right: number, centerY: number, font: string, fill: string, background: string, stroke?: string, paddingX?: number, height?: number }} options
+ * @returns {number} largura total da cápsula
+ */
+function drawPill(ctx, { text, right, centerY, font, fill, background, stroke, paddingX = 14, height = 32 }) {
+  ctx.font = font;
+  const textWidth = ctx.measureText(text).width;
+  const width = textWidth + paddingX * 2;
+  const x = right - width;
+  const y = centerY - height / 2;
+
+  fillRoundRect(ctx, { x, y, width, height, radius: height / 2, fill: background, stroke });
+
+  const align = ctx.textAlign;
+  const baseline = ctx.textBaseline;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = fill;
+  ctx.fillText(text, x + width / 2, centerY + 1);
+  ctx.textAlign = align;
+  ctx.textBaseline = baseline;
+
+  return width;
 }
 
 /**
@@ -148,10 +266,10 @@ function drawAvatar(ctx, { image, cx, cy, radius, initial, family, ring, fallbac
     const sy = (image.height - side) / 2;
     ctx.drawImage(image, sx, sy, side, side, cx - radius, cy - radius, radius * 2, radius * 2);
   } else {
-    ctx.fillStyle = fallbackFill ?? 'rgba(255, 255, 255, 0.12)';
+    ctx.fillStyle = fallbackFill ?? COLORS.track;
     ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
 
-    ctx.fillStyle = fallbackColor ?? COLORS.muted;
+    ctx.fillStyle = fallbackColor ?? COLORS.inkMuted;
     ctx.font = `bold ${Math.round(radius * 1.05)}px ${family}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -178,4 +296,16 @@ function initialOf(name) {
   return match ? match[0].toUpperCase() : '?';
 }
 
-module.exports = { roundRectPath, fillRoundRect, clipCircle, fitText, drawBar, drawAvatar, initialOf };
+module.exports = {
+  roundRectPath,
+  fillRoundRect,
+  drawAccent,
+  drawHatch,
+  drawBadge,
+  drawPill,
+  clipCircle,
+  fitText,
+  drawBar,
+  drawAvatar,
+  initialOf,
+};
