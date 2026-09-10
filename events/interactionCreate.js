@@ -9,6 +9,8 @@ const { routeEmojiConfig } = require('../handlers/emojiConfigHandler');
 const { routeVerifyInteraction } = require('../handlers/verifyHandler');
 const { routeVerifySetup } = require('../handlers/verifySetupHandler');
 const { routeAutomodSetup } = require('../handlers/automodSetupHandler');
+const { routeLevelsSetup } = require('../handlers/levelsSetupHandler');
+const { handleTopPagination } = require('../handlers/levelsLeaderboardHandler');
 const { db } = require('../database/db');
 const { errorEmbed, successEmbed } = require('../utils/embeds');
 const { respond } = require('../utils/interactions');
@@ -108,6 +110,18 @@ module.exports = {
       // Painel do /automod: selects, modais de limites e escada — próprio ack.
       if (customId.startsWith('amod_')) {
         await routeAutomodSetup(interaction);
+        return;
+      }
+      // Paginação do /top: pública e sem defer, só edita a própria mensagem.
+      // Precisa vir antes de `lvl_` — não colide (`lvlt` ≠ `lvl_`), mas a ordem
+      // deixa explícito que a listagem pública não passa pelo gate de admin.
+      if (customId.startsWith('lvltop_')) {
+        await handleTopPagination(interaction, customId.slice('lvltop_'.length));
+        return;
+      }
+      // Painel do /levelconfig: modais de XP e recompensas — próprio ack.
+      if (customId.startsWith('lvl_')) {
+        await routeLevelsSetup(interaction);
         return;
       }
       if (customId.startsWith('giveaway_enter_')) {

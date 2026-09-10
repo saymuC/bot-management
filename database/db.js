@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS guild_config (
   verify_role_id TEXT,
   verify_panel TEXT,
   automod_config TEXT,
+  levels_config TEXT,
   autorole_id TEXT,
   mute_role_id TEXT
 );
@@ -107,6 +108,19 @@ CREATE TABLE IF NOT EXISTS giveaway_entries (
   PRIMARY KEY (giveaway_id, user_id)
 );
 
+-- Levels/XP. O XP total é a única fonte de verdade: o nível é sempre derivado
+-- dele (utils/levels/formula.js), então não há coluna "level" para divergir.
+-- Também não há "last_xp_at": o cooldown vive em memória, e gravá-lo aqui seria
+-- uma escrita em disco por mensagem para um dado de 60 segundos de vida.
+CREATE TABLE IF NOT EXISTS user_levels (
+  guild_id   TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  xp         INTEGER NOT NULL DEFAULT 0 CHECK (xp >= 0),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (guild_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS reaction_roles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   guild_id TEXT NOT NULL,
@@ -122,6 +136,9 @@ CREATE INDEX IF NOT EXISTS idx_warns_guild_user ON warns (guild_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_automod_infractions_user ON automod_infractions (guild_id, user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_reaction_roles_message ON reaction_roles (message_id);
 CREATE INDEX IF NOT EXISTS idx_giveaways_pending ON giveaways (ended, ends_at);
+-- Cobre o /top e a posição individual: o desempate por user_id ASC faz parte do
+-- índice para a ordem do leaderboard ser estável sem custo extra de ordenação.
+CREATE INDEX IF NOT EXISTS idx_user_levels_leaderboard ON user_levels (guild_id, xp DESC, user_id ASC);
 `);
 
 /**
@@ -141,6 +158,7 @@ ensureColumn('guild_config', 'welcome_config', 'TEXT');
 ensureColumn('guild_config', 'emoji_config', 'TEXT');
 ensureColumn('guild_config', 'verify_panel', 'TEXT');
 ensureColumn('guild_config', 'automod_config', 'TEXT');
+ensureColumn('guild_config', 'levels_config', 'TEXT');
 ensureColumn('tickets', 'claimed_at', 'TEXT');
 ensureColumn('tickets', 'closed_by', 'TEXT');
 ensureColumn('giveaways', 'cancelled', 'INTEGER DEFAULT 0');
@@ -157,7 +175,8 @@ const upsertConfigField = (field) =>
 const CONFIG_FIELDS = [
   'welcome_channel_id', 'welcome_message', 'welcome_config', 'emoji_config', 'log_channel_id',
   'ticket_category_id', 'ticket_panel_channel_id', 'ticket_log_channel_id',
-  'verify_channel_id', 'verify_role_id', 'verify_panel', 'automod_config', 'autorole_id', 'mute_role_id',
+  'verify_channel_id', 'verify_role_id', 'verify_panel', 'automod_config', 'levels_config',
+  'autorole_id', 'mute_role_id',
 ];
 const configSetters = Object.fromEntries(CONFIG_FIELDS.map((f) => [f, upsertConfigField(f)]));
 

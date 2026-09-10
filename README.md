@@ -1,6 +1,6 @@
 # Bot Discord Multifuncional
 
-Bot de gerenciamento com tickets, moderação, **AutoMod configurável**, sorteios, boas-vindas, logs, self-roles, verificação, emojis configuráveis e controle de status — Node.js + discord.js v14 + SQLite (better-sqlite3).
+Bot de gerenciamento com tickets, moderação, **AutoMod configurável**, **níveis e XP**, sorteios, boas-vindas, logs, self-roles, verificação, emojis configuráveis e controle de status — Node.js + discord.js v14 + SQLite (better-sqlite3).
 
 ## Setup
 
@@ -18,7 +18,7 @@ npm start
 
 Convide o bot com o scope `bot applications.commands` e permissão de Administrador (ou as permissões mínimas: Manage Channels, Manage Roles, Ban/Kick/Moderate Members, Manage Messages, Create Invite).
 
-Os testes da lógica pura (normalização de texto, curingas, detectores, janelas de tempo, escada de pontos) rodam sem Discord e sem dependência extra:
+Os testes da lógica pura (normalização de texto, curingas, detectores, janelas de tempo, escada de pontos, fórmula de níveis, anti-farm) rodam sem Discord e sem dependência extra:
 
 ```bash
 npm test
@@ -26,7 +26,7 @@ npm test
 
 ## Comandos
 
-São 31 comandos. A coluna **Permissão** é a exigência padrão do Discord para o membro ver e usar o comando (dá para sobrescrever em _Configurações do servidor → Integrações_).
+São 38 comandos. A coluna **Permissão** é a exigência padrão do Discord para o membro ver e usar o comando (dá para sobrescrever em _Configurações do servidor → Integrações_).
 
 ### Moderação
 
@@ -65,6 +65,18 @@ São 31 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 |---|---|---|
 | `/setup-autorole cargo` | Define o cargo automático para novos membros | Gerenciar cargos |
 | `/reactionrole-setup cargo canal mensagem emoji` | Cria uma mensagem de auto-atribuição (botão toggle) | Gerenciar cargos |
+
+### Níveis e XP
+
+| Comando | O que faz | Permissão |
+|---|---|---|
+| `/rank usuario` | Nível, XP total, progresso até o próximo nível e posição no servidor | Todos |
+| `/top pagina` | Ranking do servidor, 10 por página, com botões de navegação | Todos |
+| `/levelconfig` | Painel do sistema de níveis: XP, cooldown, anti-farm, anúncios, exclusões e recompensas | Gerenciar servidor |
+| `/add-xp usuario quantidade` | Adiciona XP a um membro | Gerenciar servidor |
+| `/remove-xp usuario quantidade` | Remove XP de um membro | Gerenciar servidor |
+| `/set-level usuario nivel` | Define o nível de um membro (grava o XP mínimo daquele nível) | Gerenciar servidor |
+| `/reset-xp usuario` | Zera o XP de um membro, com confirmação | Gerenciar servidor |
 
 ### Utilidade
 
@@ -220,6 +232,96 @@ O select de canal na tela inicial define onde ficam os registros do AutoMod. Sem
 
 > Os comandos `/automod`, `/infractions` e `/automod-test` são novos: rode `npm run deploy` depois de atualizar, senão eles não aparecem no Discord.
 
+## Níveis e XP
+
+Sistema de engajamento por servidor: cada mensagem elegível vale um XP sorteado, o nível sai do XP acumulado e cargos podem ser entregues ao alcançar níveis.
+
+**Nasce desligado.** `/levelconfig` → `[Ativar]` é o que faz o sistema valer, pelo mesmo motivo do AutoMod: dá para configurar tudo com calma antes de o primeiro XP ser gravado.
+
+### Quando a mensagem vale XP
+
+Todas as condições precisam ser verdadeiras — basta uma falhar e **nenhum registro é criado**:
+
+- está num servidor (DM não conta) e o autor não é bot nem webhook;
+- o sistema de níveis está ligado;
+- a mensagem **não foi barrada pelo AutoMod** (ver abaixo);
+- o canal não está na lista de exclusões e o membro não tem cargo isento;
+- o texto tem o mínimo de caracteres **úteis**;
+- não é comando de bot nem menção solta ao bot;
+- não repete uma mensagem recente do mesmo autor;
+- o cooldown do autor já venceu.
+
+O anti-farm é deliberadamente modesto: ele barra farm **óbvio** — `.`, `ok`, um emoji, um link solto, a mesma frase dez vezes — e não tenta julgar se a conversa é boa, senão passaria a punir quem escreve curto. A contagem útil desconta menções, URLs e emojis, porque colar um link é um caractere de esforço e não trinta; uma frase de verdade **com** link continua valendo, porque o que sobra depois do desconto ainda passa do mínimo.
+
+A trava de repetição compara o texto normalizado (minúsculo, sem acento, espaços colapsados), então "OI" e "oi" são a mesma mensagem. O cooldown e as assinaturas de repetição vivem em memória — um reinício do bot os descarta, e nada disso vai para o banco.
+
+> **A ordem importa:** o AutoMod roda **antes** do XP, e quem decide é o retorno dele, não `message.deleted`. Uma mensagem infratora que o bot não conseguiu apagar por falta de permissão continua sem render XP — senão o caminho para farmar seria justamente infringir num canal onde o bot não apaga.
+
+### Fórmula
+
+O XP para sair do nível `N` é `5N² + 50N + 100`: 100 XP do nível 0 para o 1, 155 do 1 para o 2, 220 do 2 para o 3, e assim por diante. O nível é **sempre derivado** do XP acumulado, nunca gravado — não existe coluna `level` no banco, então não há como o nível divergir do XP. O teto é o nível 1000.
+
+Consequência prática: `/set-level` grava o XP mínimo daquele nível, e `/add-xp`/`/remove-xp` podem mudar o nível como efeito colateral. É o comportamento certo — o nível é uma leitura do XP, não um valor paralelo.
+
+### Painel do `/levelconfig`
+
+Só para você (efêmero), tudo salvo na hora, sem botão "salvar". O resumo no topo aponta a configuração **ligada mas sem efeito**: sistema desligado, canal de anúncio apagado, cargo de recompensa inutilizável, ou sistema ligado sem nenhuma recompensa e sem anúncio.
+
+| Tela | O que configura |
+|---|---|
+| **Início** | Ligar/desligar · resumo de XP, cooldown, anti-farm, exclusões e recompensas |
+| **XP e cooldown** | Modal: XP mínimo, XP máximo e cooldown em segundos |
+| **Anti-farm** | Modal: mínimo de caracteres úteis e janela de repetição |
+| **Anúncios** | Ligar/desligar · canal fixo ou "usar o canal da mensagem" |
+| **Exclusões** | Canais e cargos fora do sistema (selects múltiplos) |
+| **Recompensas** | Cargos por nível, o modo de entrega e a remoção de uma faixa |
+
+Padrões recomendados, e o que o painel traz: sistema **desligado**, 15–25 XP por mensagem, cooldown de 60 s, mínimo de 5 caracteres úteis, janela de repetição de 300 s, anúncio **ligado** no canal da mensagem, recompensas em modo acumulativo.
+
+| Campo | Faixa aceita |
+|---|---|
+| XP mínimo / máximo | 1 – 10000 |
+| Cooldown | 10 – 3600 s |
+| Caracteres úteis | 1 – 100 |
+| Janela de repetição | 0 – 3600 s (`0` desliga a trava) |
+| Canais / cargos excluídos | 50 cada |
+| Recompensas | 50 níveis, 10 cargos por nível |
+
+Excluir uma **categoria** exclui os canais dela, e excluir um canal exclui os tópicos dele — mesma leitura das isenções do AutoMod. Valor fora da faixa é grudado no limite, não recusado; config corrompida ou editada à mão volta ao padrão em vez de derrubar o motor, justamente para não impedir o admin de abrir o painel e consertá-la.
+
+### Anúncio de level-up
+
+Sai uma vez por alteração, com `allowedMentions` restrito ao autor. Um salto de vários níveis de uma vez (via `/add-xp` ou uma configuração generosa) rende **um** anúncio dizendo as duas pontas, não um por nível atravessado.
+
+O canal é o configurado; se ele foi apagado, ou se o bot não pode escrever nele, o anúncio cai no canal da mensagem. Uma falha no envio **não desfaz o XP já gravado** — a gravação vem primeiro, e o anúncio é consequência dela.
+
+### Recompensas por nível
+
+Dois modos, no painel de recompensas:
+
+- **Acumulativo** (padrão) — o membro fica com os cargos de **todos** os níveis que alcançou.
+- **Somente o maior** — fica só com os do nível mais alto alcançado; subir troca o cargo antigo pelo novo.
+
+A entrega é uma **reconciliação**, não uma concessão simples: o bot compara o que o membro deveria ter com o que ele tem e ajusta as duas direções em um lote de `add` e um de `remove`. Isso é o que faz um salto de 4 para 10 entregar também os cargos de 5 e 8, em vez de deixar o membro sem eles para sempre, e o que faz `/remove-xp` retirar o que já não vale.
+
+**O escopo é só o que o próprio módulo distribui.** Um cargo que não está na lista de recompensas nunca é removido — cargo de staff, de booster ou de self-role não desaparece porque alguém mudou de nível.
+
+Antes de tocar em qualquer cargo o bot confere a permissão *Gerenciar Cargos* e a hierarquia. Cargo acima do bot, cargo de integração (booster, bot), `@everyone` e cargo que já não existe são **relatados** em vez de silenciados: o painel marca a faixa com ⚠️ e o motivo, e os comandos de admin acrescentam uma linha `⚠️ Cargos:` na resposta. Uma falha de rede na entrega volta como problema relatado, nunca como exceção que derruba o processamento da mensagem.
+
+### `/rank` e `/top`
+
+`/rank` é **só leitura**: consultar alguém que nunca falou não cria registro nem coloca a pessoa no ranking. Mostra nível, XP no nível atual, XP total, barra de progresso e posição no servidor (a posição só aparece para quem tem XP). Com o sistema desligado ele responde e avisa disso.
+
+`/top` lista 10 por página com botões de navegação, medalhas nas três primeiras posições e barra de progresso. O desempate entre XP iguais é estável (por id), então ninguém aparece em duas páginas nem desaparece entre elas. Quem saiu do servidor continua no ranking marcado como `(saiu)` — o registro não é apagado em `guildMemberRemove`, e quem volta reencontra o progresso.
+
+### Comandos de administração
+
+`/add-xp`, `/remove-xp`, `/set-level` e `/reset-xp` exigem *Gerenciar servidor*, recusam bots como alvo e, depois de gravar, reconciliam os cargos de recompensa nas duas direções. Toda alteração vai para o canal de logs com o administrador, o membro afetado, a operação, o XP anterior e o novo, e o nível anterior e o novo.
+
+`/reset-xp` pede **confirmação** antes de zerar, e recusa quem já está com 0. Remover XP nunca deixa o total negativo, e adicionar nunca passa do teto do nível 1000.
+
+> Os sete comandos de níveis são novos: rode `npm run deploy` depois de atualizar, senão eles não aparecem no Discord.
+
 ## Sorteios
 
 `/giveaway-start premio:"Nitro" duracao:1h vencedores:1` publica o sorteio com o botão **🎉 Participar**. Ao vencer o prazo, uma varredura periódica encerra e anuncia automaticamente.
@@ -341,13 +443,16 @@ Se você preencher `CLIENT_SECRET`, `OAUTH_REDIRECT_URI` e `OAUTH_PORT` no `.env
 
 - `index.js` — entrypoint (monta o client já com a presença salva) · `deploy-commands.js` — registro de slash commands
 - `database/db.js` — schema SQLite e helpers de config
-- `handlers/` — loaders e a lógica dos painéis: tickets, giveaways, embed, verificação, boas-vindas, status, emojis e AutoMod
+- `handlers/` — loaders e a lógica dos painéis: tickets, giveaways, embed, verificação, boas-vindas, status, emojis, AutoMod e níveis
 - `handlers/automodHandler.js` — o motor (`inspectMessage`) · `handlers/automodSetupHandler.js` — painel do `/automod`
+- `handlers/levelsHandler.js` — concessão de XP na mensagem · `handlers/levelsSetupHandler.js` — painel do `/levelconfig` · `handlers/levelsLeaderboardHandler.js` — paginação do `/top`
 - `events/` — ready, interactionCreate (roteia botões/selects por prefixo do customId), message create/update, member add/remove, logs
 - `commands/<módulo>/` — um arquivo por comando
 - `config/automodRules.js` — catálogo declarativo das 19 regras (o painel e os detectores leem daqui)
+- `config/levels.js` — teto de nível, faixas aceitas, modos de recompensa e padrões do sistema de níveis
 - `utils/automod/` — `config.js` (JSON normalizado + isenções) · `textNormalize.js` (desdisfarce) · `wildcard.js` (curinga `*` sem regex do usuário) · `tracker.js` (janelas em memória) · `infractions.js` (pontos e escada) · `enforce.js` (ações e log) · `raid.js` · `detectors/` (`excess` · `media` · `links` · `words` · `flood`)
-- `test/automod.test.js` — testes da lógica pura (`npm test`)
+- `utils/levels/` — `formula.js` (nível derivado do XP) · `config.js` (JSON normalizado + exclusões) · `repository.js` (statements preparados) · `service.js` (alteração transacional) · `antiFarm.js` (elegibilidade do conteúdo) · `tracker.js` (cooldown e repetição em memória) · `rewards.js` (reconciliação de cargos) · `leaderboard.js` (formatação) · `adminAction.js` (corpo comum dos comandos de XP)
+- `test/automod.test.js` e `test/levels.*.test.js` — testes da lógica pura e de integração (`npm test`)
 - `utils/emojis.js` — registro central dos emojis · `utils/emojiSource.js` — download validado do `/emoji-add`
 - `utils/presence.js` — presença salva e normalizada · `utils/presenceKeeper.js` — garante o status após reconexões
 - `utils/captcha.js` — geração do PNG do captcha · `utils/verifyChallenges.js` — desafios e cooldowns em memória

@@ -1,0 +1,24 @@
+{
+  // Conferência de tipos apenas: o projeto continua sendo JavaScript CommonJS e
+  // `npm start` continua sendo `node index.js`. Nada aqui gera arquivo.
+  //
+  // `checkJs: false` de propósito: quem manda é o `// @ts-check` no topo de cada
+  // arquivo. Ligar a conferência no projeto inteiro encheria o relatório de erros
+  // dos módulos antigos, e aí nenhum erro novo seria visto no meio do ruído.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "module": "Node16",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "strict": true,
+    // O valor de `strict` aqui é `strictNullChecks`: ele acha o `undefined` que
+    // passou sem checagem. `noImplicitAny` ficaria pedindo `@param` em cada
+    // helper interno de duas linhas, e o ruído esconderia justamente esse ganho.
+    "noImplicitAny": false,
+    "resolveJsonModule": true,
+    "skipLibCheck": true
+  },
+  "include": ["config/**/*.js", "utils/levels/**/*.js", "handlers/levels*.js", "commands/levels/**/*.js"]
+}
