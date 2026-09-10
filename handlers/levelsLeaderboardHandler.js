@@ -58,24 +58,32 @@ async function resolveEntries(guild, userIds) {
   return entries;
 }
 
-/** Botões de navegação; desabilitados nas pontas em vez de escondidos. */
+/**
+ * Botões de navegação: sempre visíveis, desabilitados quando não há para onde ir.
+ *
+ * Aparecem mesmo com uma página só — apagados, mas presentes. É o que mostra que a
+ * listagem é paginada antes de o servidor ter gente suficiente para paginar; com os
+ * botões surgindo do nada na 11ª pessoa, a mensagem muda de forma sem aviso.
+ *
+ * O `customId` guarda a página de destino; `clampPage` no `buildTopPayload` segura o
+ * caso do 0 e do N+1, então uma página desabilitada não precisa de tratamento extra.
+ *
+ * @param {number} page
+ * @param {number} pages
+ */
 function pageComponents(page, pages) {
-  if (pages <= 1) return [];
-
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`${PREFIX}${page - 1}`)
-        .setLabel('Anterior')
-        .setEmoji('◀️')
+        .setEmoji('⬅️')
         .setStyle(ButtonStyle.Secondary)
-        .setDisabled(page <= 1),
+        .setDisabled(pages <= 1 || page <= 1),
       new ButtonBuilder()
         .setCustomId(`${PREFIX}${page + 1}`)
-        .setLabel('Próxima')
-        .setEmoji('▶️')
+        .setEmoji('➡️')
         .setStyle(ButtonStyle.Secondary)
-        .setDisabled(page >= pages)
+        .setDisabled(pages <= 1 || page >= pages)
     ),
   ];
 }
@@ -190,4 +198,4 @@ async function handleTopPagination(interaction, rawPage) {
   return interaction.editReply(payload);
 }
 
-module.exports = { PREFIX, buildTopPayload, buildTopEmbedPayload, handleTopPagination, resolveEntries };
+module.exports = { PREFIX, pageComponents, buildTopPayload, buildTopEmbedPayload, handleTopPagination, resolveEntries };

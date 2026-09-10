@@ -319,7 +319,7 @@ A tipografia das duas imagens é a **Klee One**, que viaja com o projeto em `ass
 
 Cada posição é um **cartão de papel opaco** (claro, texto escuro), não um painel translúcido: assim a legibilidade do XP não depende da imagem de fundo que o servidor configurou.
 
-`/top` desenha 10 por página, com o primeiro lugar num card mais alto e mais claro, faixa lateral e selo da posição em dourado/prata/bronze nas três primeiras, e a página no cabeçalho. Os botões de navegação **trocam a imagem** — cada página é um anexo novo, com a página no nome do arquivo para o cliente do Discord não reusar a anterior em cache. Uma última página incompleta sai mais curta, sem espaço vazio.
+`/top` desenha 10 por página, com o primeiro lugar num card mais alto e mais claro, faixa lateral e selo da posição em dourado/prata/bronze nas três primeiras, e a página no cabeçalho. Os botões ⬅️ e ➡️ **trocam a imagem** — cada página é um anexo novo, com a página no nome do arquivo para o cliente do Discord não reusar a anterior em cache. Os dois aparecem sempre, inclusive num servidor com uma página só: nesse caso ficam desabilitados, e passam a funcionar a partir do 11º participante. Uma última página incompleta sai mais curta, sem espaço vazio.
 
 O desempate entre XP iguais é estável (por id), então ninguém aparece em duas páginas nem desaparece entre elas. Quem saiu do servidor continua no ranking marcado como `(saiu)` — o registro não é apagado em `guildMemberRemove`, e quem volta reencontra o progresso.
 
