@@ -11,7 +11,8 @@
  */
 
 const { randomInt } = require('node:crypto');
-const { createCanvas, GlobalFonts } = require('@napi-rs/canvas');
+const { createCanvas } = require('@napi-rs/canvas');
+const { resolveFamilies } = require('./canvasFonts');
 const { verify: verifyConfig } = require('../config/settings');
 
 /**
@@ -19,9 +20,6 @@ const { verify: verifyConfig } = require('../config/settings');
  * Evita a pessoa errar por causa da fonte, não por causa do captcha.
  */
 const ALPHABET = 'ACDEFHJKMNPQRTUVWXY34679';
-
-/** Fontes preferidas, na ordem; caímos na primeira que o sistema tiver. */
-const FONT_CANDIDATES = ['DejaVu Sans', 'Liberation Sans', 'Arial', 'Helvetica', 'Verdana', 'Noto Sans', 'sans-serif'];
 
 /** Paleta clara para o texto, sobre o fundo escuro do tema do Discord. */
 const TEXT_COLORS = ['#ffffff', '#c9d1ff', '#ffd9a8', '#b9f6ca', '#ffc4dd', '#a8e6ff'];
@@ -33,14 +31,14 @@ const LINE_COLOR = 'rgba(255, 255, 255, 0.30)';
 const DOT_COLOR = 'rgba(255, 255, 255, 0.14)';
 
 /**
- * Família de fonte disponível no sistema.
+ * Família sans para as letras do captcha.
  *
- * Em hosts Linux enxutos (containers sem pacote de fontes) nenhuma família é
- * registrada e o texto sairia em branco, então isso é checado na inicialização.
+ * A descoberta vive em `utils/canvasFonts.js`, compartilhada com o card do
+ * ranking. Em host sem fonte nenhuma isto devolve `null`, e é por isso que a
+ * inicialização confere antes de o primeiro captcha sair em branco.
  */
 function resolveFontFamily() {
-  const available = new Set(GlobalFonts.families.map((entry) => entry.family));
-  return FONT_CANDIDATES.find((family) => available.has(family)) ?? null;
+  return resolveFamilies()?.body ?? null;
 }
 
 /**

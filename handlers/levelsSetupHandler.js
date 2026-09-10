@@ -28,7 +28,9 @@ const {
 const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
 const { TEXT_CHANNEL_TYPES } = require('../utils/channelPerms');
 const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
-const { LIMITS, REWARD_MODES } = require('../config/levels');
+const { LIMITS, REWARD_MODES, MAX_BACKGROUND_BYTES } = require('../config/levels');
+const { fetchRemoteImage } = require('../utils/remoteImage');
+const { checkCanvasFonts } = require('../utils/canvasFonts');
 const { MAX_LEVEL } = require('../utils/levels/formula');
 const { getLevelsConfig, saveLevelsConfig, normalizeIds } = require('../utils/levels/config');
 const { roleBlockReason, syncMemberRewards } = require('../utils/levels/rewards');
@@ -41,7 +43,7 @@ const PREFIX = 'lvl_';
 const safeAck = makeSafeAck('levels-setup');
 
 /** Telas do painel. O `view` é o que a navegação guarda; não há estado além dele. */
-const VIEWS = Object.freeze(['home', 'announce', 'exclusions', 'rewards']);
+const VIEWS = Object.freeze(['home', 'announce', 'exclusions', 'rewards', 'appearance']);
 
 // ---------------------------------------------------------------------------
 // Diagnóstico: configuração ligada que não faz nada
@@ -78,6 +80,13 @@ function idleWarnings(config, guild) {
 
   if (config.enabled && !config.rewards.length && !config.announceEnabled) {
     warnings.push('sem recompensas e sem anúncio, o XP acumula mas nada é visível fora do `/rank`.');
+  }
+
+  // Sem fonte no host o `/top` e o `/rank` saem em embed de texto, e aí o fundo
+  // configurado não aparece em lugar nenhum — vale avisar antes de o admin achar
+  // que a imagem dele foi ignorada.
+  if ((config.backgroundUrl || config.headline) && !checkCanvasFonts().ok) {
+    warnings.push('a aparência está configurada, mas o servidor do bot não tem fonte instalada: o ranking sai em texto.');
   }
 
   return warnings;
@@ -173,9 +182,61 @@ function homeComponents(config) {
         .setStyle(ButtonStyle.Secondary)
     ),
     new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${PREFIX}view:appearance`)
+        .setLabel('Aparência')
+        .setEmoji('🎨')
+        .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`${PREFIX}close`).setLabel('Fechar').setEmoji('❌').setStyle(ButtonStyle.Secondary)
     ),
   ];
+}
+
+// ---------------------------------------------------------------------------
+// Tela de aparência (imagem do /top e do /rank)
+// ---------------------------------------------------------------------------
+
+function appearancePayload(config, guild, notice) {
+  const fonts = checkCanvasFonts();
+
+  const embed = baseEmbed({
+    title: '🎨 Aparência do ranking',
+    description: [
+      'O `/top` e o `/rank` respondem com uma imagem gerada pelo bot. Aqui dá para trocar o fundo dela e escrever uma frase no topo.',
+      '',
+      `**Imagem de fundo:** ${config.backgroundUrl ? `[link](${config.backgroundUrl})` : '_padrão desenhado pelo bot_'}`,
+      `**Frase do topo:** ${config.headline ? `“${config.headline}”` : '_nenhuma_'}`,
+      '',
+      'A URL precisa ser `https`, apontar para uma imagem em endereço público e caber em ' +
+        `${Math.round(MAX_BACKGROUND_BYTES / 1024 / 1024)} MB. A imagem é cortada para cobrir o card, e um véu escuro entra por cima dela para o texto continuar legível.`,
+      fonts.ok ? '' : `\n⚠️ ${fonts.reason}`,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    footer: `Frase: até ${LIMITS.headlineChars} caracteres`,
+  });
+
+  return {
+    content: notice || '',
+    embeds: [embed],
+    components: [
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${PREFIX}ap-edit`)
+          .setLabel('Editar')
+          .setEmoji('✏️')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId(`${PREFIX}ap-reset`)
+          .setLabel('Voltar ao padrão')
+          .setEmoji('♻️')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(!config.backgroundUrl && !config.headline),
+        new ButtonBuilder().setCustomId(`${PREFIX}view:home`).setLabel('Voltar').setEmoji('↩️').setStyle(ButtonStyle.Secondary)
+      ),
+    ],
+    allowedMentions: { parse: [] },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -357,13 +418,14 @@ function rewardsPayload(config, guild, notice) {
  * Payload de uma tela do painel.
  * @param {import('../utils/levels/types').LevelsConfig} config
  * @param {import('discord.js').Guild} guild
- * @param {'home'|'announce'|'exclusions'|'rewards'} view
+ * @param {'home'|'announce'|'exclusions'|'rewards'|'appearance'} view
  * @param {string} [notice] linha de retorno da última ação
  */
 function buildPanelPayload(config, guild, view = 'home', notice = '') {
   if (view === 'announce') return announcePayload(config, guild, notice);
   if (view === 'exclusions') return exclusionsPayload(config, guild, notice);
   if (view === 'rewards') return rewardsPayload(config, guild, notice);
+  if (view === 'appearance') return appearancePayload(config, guild, notice);
 
   return {
     content: notice || '🔧 **Painel de níveis** — só você vê isto.',
@@ -451,6 +513,84 @@ function openRewardModal(interaction) {
     );
 
   return interaction.showModal(modal).catch(swallowAckFailure('levels-setup', interaction));
+}
+
+function openAppearanceModal(interaction, config) {
+  const modal = new ModalBuilder()
+    .setCustomId(`${PREFIX}modal-appearance`)
+    .setTitle('Aparência do ranking')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('background')
+          .setLabel('Imagem de fundo (URL https) — vazio: padrão')
+          .setStyle(TextInputStyle.Short)
+          .setMaxLength(400)
+          .setRequired(false)
+          .setPlaceholder('https://exemplo.com/fundo.png')
+          .setValue(config.backgroundUrl ?? '')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('headline')
+          .setLabel('Frase do topo — vazio: nenhuma')
+          .setStyle(TextInputStyle.Short)
+          .setMaxLength(LIMITS.headlineChars)
+          .setRequired(false)
+          .setPlaceholder('Quem mais conversou por aqui')
+          .setValue(config.headline ?? '')
+      )
+    );
+
+  return interaction.showModal(modal).catch(swallowAckFailure('levels-setup', interaction));
+}
+
+/**
+ * Salva a aparência, **baixando a imagem na hora**.
+ *
+ * Validar só o formato da URL deixaria o admin achando que configurou um fundo
+ * que na prática nunca vai aparecer — o `/top` cai no fundo desenhado em silêncio
+ * de propósito. Então o preço é um download aqui, e em troca a recusa vem com o
+ * motivo exato enquanto a pessoa ainda está no painel.
+ *
+ * URL ruim **não** é salva: a frase é gravada, o fundo anterior fica como estava.
+ */
+async function submitAppearance(interaction, config) {
+  if (!(await safeAck(interaction, () => interaction.deferUpdate()))) return undefined;
+
+  const rawUrl = interaction.fields.getTextInputValue('background').trim();
+  const headline = interaction.fields.getTextInputValue('headline');
+
+  let backgroundUrl = null;
+  let problem = '';
+
+  if (rawUrl) {
+    const result = await fetchRemoteImage(rawUrl, {
+      maxBytes: MAX_BACKGROUND_BYTES,
+      tooLarge: (kb) =>
+        `A imagem tem ${kb} KB. O limite do fundo é ${Math.round(MAX_BACKGROUND_BYTES / 1024)} KB.`,
+      notFound: 'Imagem não encontrada nesse link.',
+    });
+
+    if (result.ok) backgroundUrl = rawUrl;
+    else problem = result.error;
+  }
+
+  const saved = saveLevelsConfig(interaction.guild.id, {
+    ...config,
+    // Fundo recusado mantém o que já estava salvo: perder o fundo antigo por causa
+    // de um erro de digitação no novo seria duas perdas de uma vez.
+    backgroundUrl: problem ? config.backgroundUrl : backgroundUrl,
+    headline,
+  });
+
+  const notice = problem
+    ? `⚠️ Fundo não aceito: ${problem} A frase foi salva.`
+    : saved.backgroundUrl
+      ? '🎨 Fundo e frase salvos. Rode `/top` para ver.'
+      : '♻️ Aparência salva com o fundo padrão do bot.';
+
+  return interaction.editReply(buildPanelPayload(saved, interaction.guild, 'appearance', notice));
 }
 
 /** Ids de cargo em texto livre: aceita `<@&id>`, id puro e listas separadas por linha. */
@@ -681,6 +821,19 @@ async function routeLevelsSetup(interaction) {
         { ignoredChannelIds: [], ignoredRoleIds: [] },
         '♻️ Exclusões limpas.',
         'exclusions'
+      );
+
+    case 'ap-edit':
+      return openAppearanceModal(interaction, config);
+    case 'modal-appearance':
+      return submitAppearance(interaction, config);
+    case 'ap-reset':
+      return applyChange(
+        interaction,
+        config,
+        { backgroundUrl: null, headline: null },
+        '♻️ Aparência de volta ao padrão: fundo desenhado pelo bot e sem frase.',
+        'appearance'
       );
 
     case 'rw-add':

@@ -8,40 +8,10 @@
  */
 
 const { parseCustomEmoji } = require('./emojis');
+const { checkPublicUrl, fetchRemoteImage, REQUEST_TIMEOUT_MS } = require('./remoteImage');
 
 /** Limite do Discord para imagem de emoji. */
 const MAX_EMOJI_BYTES = 256 * 1024;
-const MAX_REDIRECTS = 3;
-const REQUEST_TIMEOUT_MS = 10_000;
-
-const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
-const PRIVATE_SUFFIXES = ['.local', '.internal', '.localhost', '.home.arpa'];
-
-/**
- * O bot baixa uma URL escolhida por quem roda o comando, então vale barrar
- * alvos internos. A checagem é por hostname (não resolve DNS), o que cobre os
- * casos óbvios; o comando ainda exige permissão de gerenciar expressões.
- *
- * @returns {{ok: true, url: URL} | {ok: false, error: string}}
- */
-function checkPublicUrl(raw) {
-  let url;
-  try {
-    url = new URL(String(raw).trim());
-  } catch {
-    return { ok: false, error: 'Esse link não é uma URL válida.' };
-  }
-
-  if (url.protocol !== 'https:') return { ok: false, error: 'Use um link `https://`.' };
-
-  const host = url.hostname.toLowerCase();
-  const isIpLiteral = IPV4_RE.test(host) || host.includes(':') || host.startsWith('[');
-  const isLocal = host === 'localhost' || PRIVATE_SUFFIXES.some((suffix) => host.endsWith(suffix));
-
-  if (isIpLiteral || isLocal) return { ok: false, error: 'Esse endereço não é público. Use um link de imagem normal.' };
-
-  return { ok: true, url };
-}
 
 /** Nome válido de emoji: 2 a 32 caracteres de `[A-Za-z0-9_]`. */
 function sanitizeEmojiName(raw, fallback = 'emoji') {
@@ -120,61 +90,21 @@ async function resolveEmojiSource({ input, attachment }) {
 }
 
 /**
- * Baixa a imagem validando destino, tipo e tamanho em cada redirecionamento.
+ * Baixa a imagem do emoji com o limite e as mensagens do `/emoji-add`.
  *
+ * A validação de destino e o passo a passo do redirecionamento estão em
+ * `utils/remoteImage.js`; o que é específico do emoji são o teto de 256 KB e o
+ * texto do 404, que fala do ID que a pessoa pode ter colado.
+ *
+ * @param {string} url
  * @returns {Promise<{ok: true, bytes: Buffer} | {ok: false, error: string}>}
  */
-async function fetchEmojiImage(url) {
-  let current = url;
-
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-    const checked = checkPublicUrl(current);
-    if (!checked.ok) return checked;
-
-    let res;
-    try {
-      res = await fetch(checked.url, {
-        redirect: 'manual',
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-    } catch (err) {
-      return { ok: false, error: `Não consegui baixar a imagem (${err.name === 'TimeoutError' ? 'tempo esgotado' : err.message}).` };
-    }
-
-    if (res.status >= 300 && res.status < 400) {
-      const location = res.headers.get('location');
-      if (!location) return { ok: false, error: 'O link redirecionou para lugar nenhum.' };
-      current = new URL(location, checked.url).toString();
-      continue;
-    }
-
-    if (!res.ok) {
-      return {
-        ok: false,
-        error:
-          res.status === 404
-            ? 'Imagem não encontrada. Se você colou um ID, confira se o emoji ainda existe.'
-            : `O servidor da imagem respondeu ${res.status}.`,
-      };
-    }
-
-    const type = String(res.headers.get('content-type') ?? '').toLowerCase();
-    if (!type.startsWith('image/')) return { ok: false, error: 'Esse link não aponta para uma imagem.' };
-
-    const declared = Number(res.headers.get('content-length'));
-    if (Number.isFinite(declared) && declared > MAX_EMOJI_BYTES) {
-      return { ok: false, error: `A imagem tem ${Math.round(declared / 1024)} KB. O limite do Discord é 256 KB.` };
-    }
-
-    const bytes = Buffer.from(await res.arrayBuffer());
-    if (bytes.length > MAX_EMOJI_BYTES) {
-      return { ok: false, error: `A imagem tem ${Math.round(bytes.length / 1024)} KB. O limite do Discord é 256 KB.` };
-    }
-
-    return { ok: true, bytes };
-  }
-
-  return { ok: false, error: 'O link redirecionou vezes demais.' };
+function fetchEmojiImage(url) {
+  return fetchRemoteImage(url, {
+    maxBytes: MAX_EMOJI_BYTES,
+    tooLarge: (kb) => `A imagem tem ${kb} KB. O limite do Discord é 256 KB.`,
+    notFound: 'Imagem não encontrada. Se você colou um ID, confira se o emoji ainda existe.',
+  });
 }
 
 module.exports = {

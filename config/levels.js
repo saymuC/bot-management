@@ -24,7 +24,18 @@ const LIMITS = Object.freeze({
   ignoredRoles: 50,
   rewards: 50,
   rolesPerReward: 10,
+  /** Frase do topo da imagem do ranking. Mais que isto não cabe na largura. */
+  headlineChars: 80,
 });
+
+/**
+ * Teto do arquivo de fundo do ranking.
+ *
+ * Bem maior que o do emoji (256 KB) porque é uma ilustração de 1000 px de
+ * largura, e bem menor que o limite de anexo do Discord porque o bot **decodifica**
+ * a imagem: um PNG de 20 MB viraria centenas de MB de bitmap na memória.
+ */
+const MAX_BACKGROUND_BYTES = 4 * 1024 * 1024;
 
 /** Como os cargos de recompensa se comportam quando o membro sobe de nível. */
 const REWARD_MODES = Object.freeze({
@@ -59,6 +70,9 @@ const DEFAULT_CONFIG = Object.freeze({
   announceChannelId: null,
   rewardMode: 'stack',
   rewards: Object.freeze([]),
+  /** Aparência da imagem do `/top` e do `/rank`. `null` = fundo desenhado pelo bot. */
+  backgroundUrl: null,
+  headline: null,
 });
 
-module.exports = { MAX_LEVEL, LIMITS, REWARD_MODES, DEFAULT_CONFIG };
+module.exports = { MAX_LEVEL, LIMITS, MAX_BACKGROUND_BYTES, REWARD_MODES, DEFAULT_CONFIG };

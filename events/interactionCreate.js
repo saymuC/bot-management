@@ -112,7 +112,8 @@ module.exports = {
         await routeAutomodSetup(interaction);
         return;
       }
-      // Paginação do /top: pública e sem defer, só edita a própria mensagem.
+      // Paginação do /top: pública, e o handler cuida do próprio ack (deferUpdate
+      // antes de desenhar a imagem da página).
       // Precisa vir antes de `lvl_` — não colide (`lvlt` ≠ `lvl_`), mas a ordem
       // deixa explícito que a listagem pública não passa pelo gate de admin.
       if (customId.startsWith('lvltop_')) {

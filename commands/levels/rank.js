@@ -1,10 +1,11 @@
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, AttachmentBuilder } = require('discord.js');
 const { respond } = require('../../utils/interactions');
 const { baseEmbed, errorEmbed } = require('../../utils/embeds');
 const { xpProgress, MAX_LEVEL } = require('../../utils/levels/formula');
 const { progressBar, formatXp } = require('../../utils/levels/leaderboard');
 const { getXp, rankOf, participantCount } = require('../../utils/levels/repository');
 const { getLevelsConfig } = require('../../utils/levels/config');
+const { renderRankCard } = require('../../utils/levels/card/rankCard');
 
 module.exports = {
   ephemeral: false,
@@ -33,6 +34,28 @@ module.exports = {
     const position = totalXp > 0 ? rankOf(interaction.guild.id, user.id, totalXp) : null;
     const member = await interaction.guild.members.fetch(user.id).catch(() => null);
 
+    const displayName = member?.displayName ?? user.username;
+    const offWarning = config.enabled ? '' : '⚠️ O sistema de níveis está desligado neste servidor.';
+
+    // Caminho normal: o card desenhado. Só cai no embed abaixo quando o host não
+    // tem fonte utilizável ou o desenho falha.
+    const image = await renderRankCard({
+      name: displayName,
+      avatarUrl: user.displayAvatarURL({ extension: 'png', size: 128 }),
+      totalXp,
+      position,
+      participants: total,
+      headline: config.headline,
+      backgroundUrl: config.backgroundUrl,
+    });
+
+    if (image) {
+      return respond(interaction, {
+        content: offWarning,
+        files: [new AttachmentBuilder(image, { name: `rank-${user.id}.png` })],
+      });
+    }
+
     const nextLine =
       progress.level >= MAX_LEVEL
         ? `Nível máximo (**${MAX_LEVEL}**) alcançado.`
@@ -41,12 +64,12 @@ module.exports = {
     return respond(interaction, {
       embeds: [
         baseEmbed({
-          title: `📈 Progresso de ${member?.displayName ?? user.username}`,
+          title: `📈 Progresso de ${displayName}`,
           description: [
             `${progressBar(progress.percent)} **${Math.round(progress.percent * 100)}%**`,
             '',
             nextLine,
-            config.enabled ? '' : '\n⚠️ O sistema de níveis está desligado neste servidor.',
+            offWarning ? `\n${offWarning}` : '',
           ]
             .filter(Boolean)
             .join('\n'),

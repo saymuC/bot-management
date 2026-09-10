@@ -17,6 +17,8 @@ const {
   normalizeRewards,
   normalizeIds,
   normalizeBool,
+  normalizeBackgroundUrl,
+  normalizeHeadline,
   isChannelIgnored,
   isMemberIgnored,
 } = require('../utils/levels/config');
@@ -182,4 +184,60 @@ test('isMemberIgnored olha os cargos do membro', () => {
   assert.equal(isMemberIgnored(config, memberWithout), false);
   assert.equal(isMemberIgnored(config, null), false);
   assert.equal(isMemberIgnored(normalizeConfig({}), memberWith), false);
+});
+
+// ---------------------------------------------------------------------------
+// Aparência: fundo por URL e frase do topo
+// ---------------------------------------------------------------------------
+
+test('normalizeBackgroundUrl só aceita https em endereço público', () => {
+  assert.equal(
+    normalizeBackgroundUrl('https://cdn.exemplo.com/fundo.png'),
+    'https://cdn.exemplo.com/fundo.png',
+    'https em domínio público passa'
+  );
+
+  // Cada uma destas seria um pedido que o bot faria sozinho a cada `/top`, e a
+  // config é o lugar onde ele é recusado — não a hora do download.
+  assert.equal(normalizeBackgroundUrl('http://cdn.exemplo.com/fundo.png'), null, 'http sem TLS');
+  assert.equal(normalizeBackgroundUrl('https://127.0.0.1/fundo.png'), null, 'IPv4 literal');
+  assert.equal(normalizeBackgroundUrl('https://[::1]/fundo.png'), null, 'IPv6 literal');
+  assert.equal(normalizeBackgroundUrl('https://localhost/fundo.png'), null, 'localhost');
+  assert.equal(normalizeBackgroundUrl('https://cofre.internal/fundo.png'), null, 'sufixo interno');
+  assert.equal(normalizeBackgroundUrl('ftp://exemplo.com/fundo.png'), null, 'protocolo estranho');
+  assert.equal(normalizeBackgroundUrl('não é url'), null, 'texto solto');
+
+  assert.equal(normalizeBackgroundUrl(''), null, 'vazio é "sem fundo", não erro');
+  assert.equal(normalizeBackgroundUrl('   '), null);
+  assert.equal(normalizeBackgroundUrl(null), null);
+  assert.equal(normalizeBackgroundUrl(undefined), null);
+});
+
+test('normalizeHeadline corta, achata espaços e trata vazio como ausência', () => {
+  assert.equal(normalizeHeadline('  Quem mais conversou  '), 'Quem mais conversou');
+
+  // O modal do Discord aceita Enter num campo curto; a frase é uma linha só na
+  // imagem, então a quebra virá espaço em vez de invalidar a config inteira.
+  assert.equal(normalizeHeadline('duas\nlinhas'), 'duas linhas');
+  assert.equal(normalizeHeadline('muitos     espaços'), 'muitos espaços');
+
+  const long = 'a'.repeat(LIMITS.headlineChars + 40);
+  assert.equal(normalizeHeadline(long).length, LIMITS.headlineChars, 'cortada no limite');
+
+  assert.equal(normalizeHeadline(''), null);
+  assert.equal(normalizeHeadline('   \n  '), null, 'só espaço não é frase');
+  assert.equal(normalizeHeadline(null), null);
+});
+
+test('normalizeConfig aplica a aparência junto do resto', () => {
+  const config = normalizeConfig({
+    backgroundUrl: 'https://exemplo.com/a.png',
+    headline: '  frase  ',
+  });
+  assert.equal(config.backgroundUrl, 'https://exemplo.com/a.png');
+  assert.equal(config.headline, 'frase');
+
+  const rejected = normalizeConfig({ backgroundUrl: 'http://exemplo.com/a.png' });
+  assert.equal(rejected.backgroundUrl, DEFAULT_CONFIG.backgroundUrl);
+  assert.equal(rejected.headline, DEFAULT_CONFIG.headline);
 });

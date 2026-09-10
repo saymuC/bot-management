@@ -12,6 +12,7 @@
  */
 
 const { getGuildConfig, setGuildConfig } = require('../../database/db');
+const { checkPublicUrl } = require('../remoteImage');
 const { MAX_LEVEL, LIMITS, REWARD_MODES, DEFAULT_CONFIG } = require('../../config/levels');
 
 const isSnowflake = (value) => typeof value === 'string' && /^\d{17,20}$/.test(value);
@@ -40,6 +41,39 @@ function normalizeBool(raw, fallback) {
   if (['sim', 's', 'true', '1', 'yes', 'y', 'on', 'ligado'].includes(text)) return true;
   if (['nao', 'não', 'n', 'false', '0', 'no', 'off', 'desligado'].includes(text)) return false;
   return fallback;
+}
+
+/**
+ * URL de fundo aceitável, ou `null`.
+ *
+ * A mesma checagem do `/emoji-add`: só `https` e só endereço público. Guardar
+ * uma URL interna aqui seria guardar um pedido que o bot faria sozinho a cada
+ * `/top`, e o painel valida na hora de salvar justamente para o admin não
+ * descobrir isso pela imagem sem fundo.
+ *
+ * @param {unknown} raw
+ * @returns {string|null}
+ */
+function normalizeBackgroundUrl(raw) {
+  if (raw === null || raw === undefined || String(raw).trim() === '') return null;
+  const checked = checkPublicUrl(raw);
+  return checked.ok ? checked.url.toString() : null;
+}
+
+/**
+ * Frase do topo da imagem: uma linha, cortada no limite.
+ *
+ * Quebra de linha é removida em vez de recusada — o modal do Discord aceita
+ * `Enter` num campo curto, e recusar a config inteira por causa disso seria
+ * perder o texto que a pessoa escreveu.
+ *
+ * @param {unknown} raw
+ * @returns {string|null}
+ */
+function normalizeHeadline(raw) {
+  if (raw === null || raw === undefined) return null;
+  const text = String(raw).replace(/\s+/g, ' ').trim().slice(0, LIMITS.headlineChars);
+  return text || null;
 }
 
 /**
@@ -112,6 +146,8 @@ function normalizeConfig(raw) {
     announceChannelId: isSnowflake(source.announceChannelId) ? source.announceChannelId : null,
     rewardMode: Object.hasOwn(REWARD_MODES, source.rewardMode) ? source.rewardMode : DEFAULT_CONFIG.rewardMode,
     rewards: normalizeRewards(source.rewards),
+    backgroundUrl: normalizeBackgroundUrl(source.backgroundUrl),
+    headline: normalizeHeadline(source.headline),
   };
 }
 
@@ -187,6 +223,8 @@ module.exports = {
   normalizeBool,
   normalizeIds,
   normalizeRewards,
+  normalizeBackgroundUrl,
+  normalizeHeadline,
   normalizeConfig,
   getLevelsConfig,
   saveLevelsConfig,

@@ -70,9 +70,9 @@ São 38 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 
 | Comando | O que faz | Permissão |
 |---|---|---|
-| `/rank usuario` | Nível, XP total, progresso até o próximo nível e posição no servidor | Todos |
-| `/top pagina` | Ranking do servidor, 10 por página, com botões de navegação | Todos |
-| `/levelconfig` | Painel do sistema de níveis: XP, cooldown, anti-farm, anúncios, exclusões e recompensas | Gerenciar servidor |
+| `/rank usuario` | Card com nível, XP total, progresso até o próximo nível e posição no servidor | Todos |
+| `/top pagina` | Imagem do ranking, 10 por página, com botões que trocam a imagem | Todos |
+| `/levelconfig` | Painel do sistema de níveis: XP, cooldown, anti-farm, anúncios, exclusões, recompensas e aparência | Gerenciar servidor |
 | `/add-xp usuario quantidade` | Adiciona XP a um membro | Gerenciar servidor |
 | `/remove-xp usuario quantidade` | Remove XP de um membro | Gerenciar servidor |
 | `/set-level usuario nivel` | Define o nível de um membro (grava o XP mínimo daquele nível) | Gerenciar servidor |
@@ -275,6 +275,7 @@ Só para você (efêmero), tudo salvo na hora, sem botão "salvar". O resumo no 
 | **Anúncios** | Ligar/desligar · canal fixo ou "usar o canal da mensagem" |
 | **Exclusões** | Canais e cargos fora do sistema (selects múltiplos) |
 | **Recompensas** | Cargos por nível, o modo de entrega e a remoção de uma faixa |
+| **Aparência** | Modal: imagem de fundo (URL) e frase do topo das imagens do `/top` e do `/rank` |
 
 Padrões recomendados, e o que o painel traz: sistema **desligado**, 15–25 XP por mensagem, cooldown de 60 s, mínimo de 5 caracteres úteis, janela de repetição de 300 s, anúncio **ligado** no canal da mensagem, recompensas em modo acumulativo.
 
@@ -310,9 +311,34 @@ Antes de tocar em qualquer cargo o bot confere a permissão *Gerenciar Cargos* e
 
 ### `/rank` e `/top`
 
-`/rank` é **só leitura**: consultar alguém que nunca falou não cria registro nem coloca a pessoa no ranking. Mostra nível, XP no nível atual, XP total, barra de progresso e posição no servidor (a posição só aparece para quem tem XP). Com o sistema desligado ele responde e avisa disso.
+Os dois respondem com uma **imagem gerada pelo bot**: fundo escuro, avatar circular, nome, nível, barra de progresso e `XP no nível / XP do nível`.
 
-`/top` lista 10 por página com botões de navegação, medalhas nas três primeiras posições e barra de progresso. O desempate entre XP iguais é estável (por id), então ninguém aparece em duas páginas nem desaparece entre elas. Quem saiu do servidor continua no ranking marcado como `(saiu)` — o registro não é apagado em `guildMemberRemove`, e quem volta reencontra o progresso.
+`/rank` é **só leitura**: consultar alguém que nunca falou não cria registro nem coloca a pessoa no ranking. O card traz nível, XP no nível atual, XP total, barra e posição no servidor (a posição só aparece para quem tem XP). Com o sistema desligado ele responde e avisa disso.
+
+`/top` desenha 10 por página, com o primeiro lugar num card claro e mais alto, número em dourado/prata/bronze nas três primeiras posições e a página no cabeçalho. Os botões de navegação **trocam a imagem** — cada página é um anexo novo, com a página no nome do arquivo para o cliente do Discord não reusar a anterior em cache. Uma última página incompleta sai mais curta, sem espaço vazio.
+
+O desempate entre XP iguais é estável (por id), então ninguém aparece em duas páginas nem desaparece entre elas. Quem saiu do servidor continua no ranking marcado como `(saiu)` — o registro não é apagado em `guildMemberRemove`, e quem volta reencontra o progresso.
+
+Detalhes que só aparecem quando algo dá errado:
+
+- **Sem fonte no host** (container Linux enxuto sem pacote de fontes) o `@napi-rs/canvas` não registra família nenhuma e a imagem sairia em branco. Nesse caso os dois comandos caem no **embed de texto** automaticamente — o mesmo requisito do captcha da verificação, resolvido com `apt-get install fonts-dejavu-core`.
+- Avatar que não baixa vira um círculo com a inicial do nome, nunca um furo na linha. Qualquer falha no desenho também cai no embed, com log no console.
+- Páginas já desenhadas ficam ~60 s em cache, chaveadas pelo XP das linhas: ida e volta nos botões não redesenha nada, e XP novo invalida a imagem sozinho.
+
+### Aparência do ranking
+
+`/levelconfig` → `[🎨 Aparência]` configura duas coisas por servidor:
+
+| Campo | O que faz |
+|---|---|
+| Imagem de fundo | URL de uma imagem que entra atrás do ranking, cobrindo a área sem distorcer, com um véu escuro por cima para o texto continuar legível |
+| Frase do topo | Até 80 caracteres abaixo do nome do servidor (ex.: "Quem mais conversou desde o começo do mês") |
+
+Sem imagem configurada o bot **desenha** o fundo (gradiente escuro, textura e vinheta) — a aparência padrão não depende de nada externo.
+
+A URL passa pela mesma validação do `/emoji-add`: só `https`, só host público (IP literal, `localhost` e domínios internos são recusados), com teto de 4 MB, tempo limite e revalidação a cada redirecionamento. O painel **baixa a imagem na hora de salvar** e diz o motivo exato quando recusa — validar só o formato deixaria o admin achar que configurou algo que nunca vai aparecer. Uma URL recusada não apaga a que já estava salva. `[♻️ Voltar ao padrão]` limpa os dois campos.
+
+Depois de salva, a imagem é baixada uma vez por hora e guardada decodificada em memória. Se o host de terceiro sair do ar, o ranking volta ao fundo desenhado sem avisar ninguém.
 
 ### Comandos de administração
 
@@ -451,9 +477,12 @@ Se você preencher `CLIENT_SECRET`, `OAUTH_REDIRECT_URI` e `OAUTH_PORT` no `.env
 - `config/automodRules.js` — catálogo declarativo das 19 regras (o painel e os detectores leem daqui)
 - `config/levels.js` — teto de nível, faixas aceitas, modos de recompensa e padrões do sistema de níveis
 - `utils/automod/` — `config.js` (JSON normalizado + isenções) · `textNormalize.js` (desdisfarce) · `wildcard.js` (curinga `*` sem regex do usuário) · `tracker.js` (janelas em memória) · `infractions.js` (pontos e escada) · `enforce.js` (ações e log) · `raid.js` · `detectors/` (`excess` · `media` · `links` · `words` · `flood`)
+- `utils/levels/card/` — o desenho das imagens: `theme.js` (medidas e paleta) · `primitives.js` (retângulo, avatar, barra, corte de texto) · `background.js` (fundo gerado e o remoto em cache) · `avatars.js` (download em paralelo com reserva) · `leaderboardCard.js` (página do `/top`) · `rankCard.js` (card do `/rank`) · `cache.js` (TTL + teto)
+- `utils/canvasFonts.js` — descoberta das fontes do sistema e a cadeia de reserva por glifo (emoji, CJK), compartilhada pelo card e pelo captcha
+- `utils/remoteImage.js` — download validado de imagem remota (https, host público, teto de bytes), usado pelo `/emoji-add` e pelo fundo do ranking
 - `utils/levels/` — `formula.js` (nível derivado do XP) · `config.js` (JSON normalizado + exclusões) · `repository.js` (statements preparados) · `service.js` (alteração transacional) · `antiFarm.js` (elegibilidade do conteúdo) · `tracker.js` (cooldown e repetição em memória) · `rewards.js` (reconciliação de cargos) · `leaderboard.js` (formatação) · `adminAction.js` (corpo comum dos comandos de XP)
 - `test/automod.test.js` e `test/levels.*.test.js` — testes da lógica pura e de integração (`npm test`)
-- `utils/emojis.js` — registro central dos emojis · `utils/emojiSource.js` — download validado do `/emoji-add`
+- `utils/emojis.js` — registro central dos emojis · `utils/emojiSource.js` — resolução da origem do emoji (upload, ID ou URL)
 - `utils/presence.js` — presença salva e normalizada · `utils/presenceKeeper.js` — garante o status após reconexões
 - `utils/captcha.js` — geração do PNG do captcha · `utils/verifyChallenges.js` — desafios e cooldowns em memória
 - `utils/verifyPanelConfig.js` — aparência salva do painel de verificação (embed + botão)

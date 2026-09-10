@@ -31,6 +31,8 @@
  * @property {string|null} announceChannelId canal fixo, ou null para o canal da mensagem
  * @property {RewardMode} rewardMode
  * @property {LevelReward[]} rewards ordenadas por nível crescente
+ * @property {string|null} backgroundUrl fundo da imagem do ranking, ou null para o fundo desenhado
+ * @property {string|null} headline frase exibida no topo da imagem do ranking
  */
 
 /**
