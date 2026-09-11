@@ -15,7 +15,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createCanvas } = require('@napi-rs/canvas');
 
+const { DEFAULT_THEME } = require('../config/levels');
 const { checkCanvasFonts, fontStacks } = require('../utils/canvasFonts');
+const { padWithDemo, DEMO_ENTRIES } = require('../utils/levels/card/preview');
 const { createCache } = require('../utils/levels/card/cache');
 const { fitText } = require('../utils/levels/card/primitives');
 const { TOP } = require('../utils/levels/card/theme');
@@ -302,4 +304,129 @@ test('ranking vazio e página incompleta também rendem imagem', { skip: !temFon
     dadosDePagina({ page: 3, entries: entradas(3, 21), headline: null })
   );
   assert.ok(Buffer.isBuffer(ultima));
+});
+
+// --- Tema aplicado ao desenho ----------------------------------------------
+
+test('a altura respeita as medidas ajustadas pelo tema', () => {
+  const semRodape = { ...TOP, footerHeight: 0 };
+
+  assert.equal(
+    cardHeight(4, true, semRodape),
+    cardHeight(4, true) - TOP.footerHeight,
+    'rodapé desligado não pode reservar altura'
+  );
+  assert.ok(cardHeight(4, true, semRodape) < cardHeight(4, true));
+});
+
+test('a assinatura da página muda quando só o tema muda', () => {
+  const base = dadosDePagina();
+  const original = pageSignature(base);
+
+  const variacoes = [
+    { preset: 'noir' },
+    { accent: 'dourado' },
+    { cardColor: '#101014' },
+    { veil: 20 },
+    { corners: 'square' },
+    { title: 'Hall da fama' },
+    { showAvatars: false },
+    { showFooter: false },
+  ];
+
+  for (const theme of variacoes) {
+    assert.notEqual(
+      pageSignature({ ...base, theme: { ...DEFAULT_THEME, ...theme } }),
+      original,
+      `tema ${JSON.stringify(theme)} tem de invalidar o cache`
+    );
+  }
+
+  assert.equal(
+    pageSignature({ ...base, theme: { ...DEFAULT_THEME } }),
+    original,
+    'tema igual ao padrão não muda a assinatura de quem não tem tema'
+  );
+});
+
+test('um tema bem diferente do padrão também rende imagem', { skip: !temFonte }, async () => {
+  pageCache.clear();
+
+  const escuro = await renderLeaderboardCard(
+    dadosDePagina({
+      theme: {
+        ...DEFAULT_THEME,
+        preset: 'noir',
+        accent: 'dourado',
+        corners: 'square',
+        veil: 0,
+        title: 'Hall da fama',
+        showAvatars: false,
+        showFooter: false,
+        showShadow: false,
+      },
+    })
+  );
+
+  assert.ok(Buffer.isBuffer(escuro), 'papel escuro, cantos retos e sem avatar continuam desenháveis');
+  assert.deepEqual([...escuro.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  assert.ok(escuro.length > 5000, `PNG suspeitosamente pequeno: ${escuro.length} bytes`);
+});
+
+test('desligar tudo de uma vez não quebra o desenho', { skip: !temFonte }, async () => {
+  pageCache.clear();
+
+  const cru = await renderLeaderboardCard(
+    dadosDePagina({
+      theme: {
+        ...DEFAULT_THEME,
+        showAvatars: false,
+        showBars: false,
+        showTexture: false,
+        showShadow: false,
+        showMedals: false,
+        showFooter: false,
+      },
+    })
+  );
+
+  assert.ok(Buffer.isBuffer(cru));
+});
+
+// --- Preview da tela de aparência ------------------------------------------
+
+test('padWithDemo completa as linhas que faltam sem furar a ordem do XP', () => {
+  const real = [{ position: 1, id: '1', name: 'Real', avatarUrl: null, totalXp: 30_000 }];
+  const completo = padWithDemo(real, 4);
+
+  assert.equal(completo.length, 4);
+  assert.deepEqual(
+    completo.map((linha) => linha.position),
+    [1, 2, 3, 4],
+    'a numeração continua de onde o real parou'
+  );
+  assert.equal(completo[0], real[0], 'a linha real não é tocada');
+
+  for (let i = 1; i < completo.length; i += 1) {
+    assert.ok(
+      completo[i].totalXp < completo[i - 1].totalXp,
+      `linha ${i + 1} tem de ter menos XP que a de cima`
+    );
+    assert.ok(completo[i].totalXp >= 1, 'ninguém aparece com XP zero ou negativo');
+  }
+});
+
+test('padWithDemo com o ranking vazio usa os exemplos como estão', () => {
+  const completo = padWithDemo([], 4);
+  assert.deepEqual(
+    completo.map((linha) => linha.name),
+    DEMO_ENTRIES.map((demo) => demo.name)
+  );
+  assert.equal(padWithDemo([], 0).length, 0);
+});
+
+test('padWithDemo não mexe no que já está completo', () => {
+  const real = entradas(4);
+  assert.equal(padWithDemo(real, 4), real, 'sem linha faltando, devolve o próprio array');
+  assert.equal(padWithDemo(real, 2).length, 4, 'nunca corta linhas reais');
 });

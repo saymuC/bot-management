@@ -8,7 +8,7 @@
  * outro, e o que faz esta parte ser testável sem montar uma página inteira.
  */
 
-const { BAR, COLORS } = require('./theme');
+const { BAR } = require('./theme');
 
 /** @typedef {import('@napi-rs/canvas').SKRSContext2D} Ctx */
 /** @typedef {ReturnType<Ctx['createLinearGradient']>} Gradient */
@@ -228,18 +228,22 @@ function fitText(ctx, text, maxWidth) {
  * some, e "quase nada" tem de aparecer diferente de "nada".
  *
  * @param {Ctx} ctx
- * @param {{ x: number, y: number, width: number, height?: number, percent: number, track?: string, from?: string, to?: string }} options
+ * As três cores vêm de quem chama, sem default: a paleta é resolvida a partir do
+ * tema do servidor, e cair para uma cor fixa aqui desenharia uma barra do tema
+ * antigo dentro de um cartão do tema novo.
+ *
+ * @param {{ x: number, y: number, width: number, height?: number, percent: number, track: string, from: string, to: string }} options
  */
 function drawBar(ctx, { x, y, width, height = BAR.height, percent, track, from, to }) {
-  fillRoundRect(ctx, { x, y, width, height, radius: height / 2, fill: track ?? COLORS.track });
+  fillRoundRect(ctx, { x, y, width, height, radius: height / 2, fill: track });
 
   const ratio = Math.max(0, Math.min(1, Number.isFinite(percent) ? percent : 0));
   if (ratio <= 0) return;
 
   const filled = Math.max(height, Math.round(width * ratio));
   const gradient = ctx.createLinearGradient(x, y, x + filled, y);
-  gradient.addColorStop(0, from ?? COLORS.barFrom);
-  gradient.addColorStop(1, to ?? COLORS.barTo);
+  gradient.addColorStop(0, from);
+  gradient.addColorStop(1, to);
 
   fillRoundRect(ctx, { x, y, width: Math.min(width, filled), height, radius: height / 2, fill: gradient });
 }
@@ -252,7 +256,7 @@ function drawBar(ctx, { x, y, width, height = BAR.height, percent, track, from, 
  * um furo — e muito melhor do que uma exceção no meio do render.
  *
  * @param {Ctx} ctx
- * @param {{ image: import('@napi-rs/canvas').Image|null, cx: number, cy: number, radius: number, initial?: string, family: string, ring?: string, fallbackFill?: string, fallbackColor?: string }} options
+ * @param {{ image: import('@napi-rs/canvas').Image|null, cx: number, cy: number, radius: number, initial?: string, family: string, ring?: string, fallbackFill: string, fallbackColor: string }} options
  */
 function drawAvatar(ctx, { image, cx, cy, radius, initial, family, ring, fallbackFill, fallbackColor }) {
   ctx.save();
@@ -266,10 +270,10 @@ function drawAvatar(ctx, { image, cx, cy, radius, initial, family, ring, fallbac
     const sy = (image.height - side) / 2;
     ctx.drawImage(image, sx, sy, side, side, cx - radius, cy - radius, radius * 2, radius * 2);
   } else {
-    ctx.fillStyle = fallbackFill ?? COLORS.track;
+    ctx.fillStyle = fallbackFill;
     ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
 
-    ctx.fillStyle = fallbackColor ?? COLORS.inkMuted;
+    ctx.fillStyle = fallbackColor;
     ctx.font = `bold ${Math.round(radius * 1.05)}px ${family}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';

@@ -166,6 +166,7 @@ async function buildTopPayload(guild, requestedPage) {
     entries,
     headline: config.headline,
     backgroundUrl: config.backgroundUrl,
+    theme: config.theme,
   });
 
   if (!image) {

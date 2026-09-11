@@ -275,7 +275,7 @@ Só para você (efêmero), tudo salvo na hora, sem botão "salvar". O resumo no 
 | **Anúncios** | Ligar/desligar · canal fixo ou "usar o canal da mensagem" |
 | **Exclusões** | Canais e cargos fora do sistema (selects múltiplos) |
 | **Recompensas** | Cargos por nível, o modo de entrega e a remoção de uma faixa |
-| **Aparência** | Modal: imagem de fundo (URL) e frase do topo das imagens do `/top` e do `/rank` |
+| **Aparência** | Editor visual das imagens do `/top` e do `/rank`, com **preview ao vivo**: tema, cor de destaque, véu, cantos, elementos visíveis, textos e imagem de fundo |
 
 Padrões recomendados, e o que o painel traz: sistema **desligado**, 15–25 XP por mensagem, cooldown de 60 s, mínimo de 5 caracteres úteis, janela de repetição de 300 s, anúncio **ligado** no canal da mensagem, recompensas em modo acumulativo.
 
@@ -331,14 +331,26 @@ Detalhes que só aparecem quando algo dá errado:
 
 ### Aparência do ranking
 
-`/levelconfig` → `[🎨 Aparência]` configura duas coisas por servidor:
+`/levelconfig` → `[🎨 Aparência]` abre um editor com **preview ao vivo**: cada clique grava a mudança e a tela volta já com a imagem redesenhada. O que dá para ajustar, por servidor:
 
-| Campo | O que faz |
-|---|---|
-| Imagem de fundo | URL de uma imagem que entra atrás do ranking, cobrindo a área sem distorcer, com um véu escuro por cima para o texto continuar legível |
-| Frase do topo | Até 80 caracteres abaixo do nome do servidor (ex.: "Quem mais conversou desde o começo do mês") |
+| Ajuste | Onde fica | O que faz |
+|---|---|---|
+| Tema | select | 6 paletas prontas (📜 Papel, 🌑 Noir, 🌸 Sakura, 🌿 Menta, 🔥 Âmbar, 🪨 Ardósia) — papel claro e papel escuro convivem na lista |
+| Cor de destaque | select | 11 cores nomeadas para a barra de progresso, o selo e os detalhes, mais "personalizada (hex)" |
+| Elementos visíveis | select múltiplo | liga/desliga avatares, barras de progresso, textura, sombra, medalhas do pódio e rodapé |
+| Véu e cantos | select | opacidade do véu sobre a imagem de fundo (0–90%, em passos de 10) e cantos arredondados ou retos |
+| Título | modal | até 28 caracteres no lugar de "Ranking de XP" |
+| Frase do topo | modal | até 80 caracteres abaixo do nome do servidor (ex.: "Quem mais conversou desde o começo do mês") |
+| Imagem de fundo | modal | URL de uma imagem que entra atrás do ranking, cobrindo a área sem distorcer |
+| Cores em hex | modal | papel e destaque como `#e8e6de #2a2c34`, para quem quer a cor exata da marca |
 
-Sem imagem configurada o bot **desenha** o fundo (gradiente escuro, textura e vinheta) — a aparência padrão não depende de nada externo.
+**A cor do texto não é configurável, e isso é de propósito.** Ela é derivada da luminância do papel: papel claro recebe tinta escura, papel escuro recebe tinta clara. Um hex livre para o texto permitiria salvar um ranking ilegível sem perceber — o que existe hoje garante contraste em qualquer cor de papel escolhida.
+
+O preview usa as **posições reais** do servidor. Quando ainda não há gente suficiente para quatro linhas, as que faltam vêm de exemplos (Ada, Bruno, Clara, Dinho) com XP rebaixado para ficar abaixo da última linha real, e o painel avisa que aquilo é exemplo. `[👤 Ver /rank]` / `[🏆 Ver /top]` alterna qual das duas imagens o preview mostra — o tema vale para as duas, e metade dos ajustes só aparece em uma delas.
+
+Sem imagem configurada o bot **desenha** o fundo (gradiente do tema, textura e vinheta) — a aparência padrão não depende de nada externo, e um servidor que nunca abriu esta tela recebe exatamente a imagem de antes do editor existir. `[♻️ Voltar ao padrão]` devolve tudo ao estado inicial, inclusive o fundo e os textos.
+
+Valor inválido nunca derruba o painel: hex malformado, véu fora da faixa ou tema inexistente voltam ao padrão na leitura da config.
 
 A URL passa pela mesma validação do `/emoji-add`: só `https`, só host público (IP literal, `localhost` e domínios internos são recusados), com teto de 4 MB, tempo limite e revalidação a cada redirecionamento. O painel **baixa a imagem na hora de salvar** e diz o motivo exato quando recusa — validar só o formato deixaria o admin achar que configurou algo que nunca vai aparecer. Uma URL recusada não apaga a que já estava salva. `[♻️ Voltar ao padrão]` limpa os dois campos.
 
@@ -481,7 +493,7 @@ Se você preencher `CLIENT_SECRET`, `OAUTH_REDIRECT_URI` e `OAUTH_PORT` no `.env
 - `config/automodRules.js` — catálogo declarativo das 19 regras (o painel e os detectores leem daqui)
 - `config/levels.js` — teto de nível, faixas aceitas, modos de recompensa e padrões do sistema de níveis
 - `utils/automod/` — `config.js` (JSON normalizado + isenções) · `textNormalize.js` (desdisfarce) · `wildcard.js` (curinga `*` sem regex do usuário) · `tracker.js` (janelas em memória) · `infractions.js` (pontos e escada) · `enforce.js` (ações e log) · `raid.js` · `detectors/` (`excess` · `media` · `links` · `words` · `flood`)
-- `utils/levels/card/` — o desenho das imagens: `theme.js` (medidas e paleta) · `primitives.js` (retângulo, avatar, barra, corte de texto) · `background.js` (fundo gerado e o remoto em cache) · `avatars.js` (download em paralelo com reserva) · `leaderboardCard.js` (página do `/top`) · `rankCard.js` (card do `/rank`) · `cache.js` (TTL + teto)
+- `utils/levels/card/` — o desenho das imagens: `theme.js` (medidas e paleta padrão) · `visual.js` (resolve o tema configurado em paleta, medidas e flags, com a tinta derivada do papel) · `primitives.js` (retângulo, avatar, barra, corte de texto) · `background.js` (fundo gerado e o remoto em cache) · `avatars.js` (download em paralelo com reserva) · `leaderboardCard.js` (página do `/top`) · `rankCard.js` (card do `/rank`) · `preview.js` (amostra da tela de Aparência, com dados reais completados por exemplos) · `cache.js` (TTL + teto)
 - `utils/canvasFonts.js` — registro da fonte embutida, descoberta das fontes do sistema e a cadeia de reserva por glifo (emoji, CJK), compartilhada pelo card e pelo captcha
 - `assets/fonts/` — Klee One (Regular e SemiBold) usada nas imagens do ranking, com a licença OFL ao lado
 - `utils/remoteImage.js` — download validado de imagem remota (https, host público, teto de bytes), usado pelo `/emoji-add` e pelo fundo do ranking

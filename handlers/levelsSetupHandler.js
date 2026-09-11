@@ -13,6 +13,7 @@
 
 const {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   ChannelSelectMenuBuilder,
@@ -28,11 +29,21 @@ const {
 const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
 const { TEXT_CHANNEL_TYPES } = require('../utils/channelPerms');
 const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
-const { LIMITS, REWARD_MODES, MAX_BACKGROUND_BYTES } = require('../config/levels');
+const {
+  LIMITS,
+  REWARD_MODES,
+  MAX_BACKGROUND_BYTES,
+  THEME_PRESETS,
+  ACCENT_COLORS,
+  CORNER_STYLES,
+  THEME_TOGGLES,
+  DEFAULT_THEME,
+} = require('../config/levels');
 const { fetchRemoteImage } = require('../utils/remoteImage');
 const { checkCanvasFonts } = require('../utils/canvasFonts');
 const { MAX_LEVEL } = require('../utils/levels/formula');
-const { getLevelsConfig, saveLevelsConfig, normalizeIds } = require('../utils/levels/config');
+const { getLevelsConfig, saveLevelsConfig, normalizeIds, normalizeHexColor } = require('../utils/levels/config');
+const { renderAppearancePreview } = require('../utils/levels/card/preview');
 const { roleBlockReason, syncMemberRewards } = require('../utils/levels/rewards');
 const { resetUserXp } = require('../utils/levels/service');
 const { logEvent } = require('../utils/logger');
@@ -196,47 +207,206 @@ function homeComponents(config) {
 // Tela de aparência (imagem do /top e do /rank)
 // ---------------------------------------------------------------------------
 
-function appearancePayload(config, guild, notice) {
+/**
+ * Passos do véu no seletor.
+ *
+ * De 10 em 10 em vez de um campo numérico: a diferença entre 47% e 50% não é
+ * visível, e um select resolve na mesma interação — um modal só para isso custaria
+ * dois cliques a mais por ajuste, numa tela feita para ser mexida repetidamente.
+ */
+const VEIL_STEPS = Object.freeze([0, 10, 20, 30, 40, 50, 60, 70, 80, 90]);
+
+/** Valor do select de accent que abre o modal em vez de gravar uma cor do catálogo. */
+const ACCENT_CUSTOM = 'custom';
+
+/**
+ * A aparência descrita em linhas curtas, para o admin conferir sem contar cliques.
+ *
+ * @param {import('../utils/levels/types').LevelsConfig} config
+ */
+function appearanceSummary(config) {
+  const theme = config.theme;
+  const preset = THEME_PRESETS[theme.preset];
+  const accent = ACCENT_COLORS[theme.accent];
+  const off = THEME_TOGGLES.filter((toggle) => !theme[toggle.key]);
+
+  return [
+    `**Tema:** ${preset.emoji} ${preset.label}${theme.cardColor ? ` · papel \`${theme.cardColor}\`` : ''}`,
+    `**Destaque:** ${theme.accentColor ? `🎨 \`${theme.accentColor}\`` : `${accent.emoji} ${accent.label}`}`,
+    `**Cantos:** ${CORNER_STYLES[theme.corners].emoji} ${CORNER_STYLES[theme.corners].label} · **véu do fundo:** ${theme.veil}%`,
+    `**Título:** ${theme.title ? `“${theme.title}”` : '_Ranking de XP_'} · **frase:** ${
+      config.headline ? `“${config.headline}”` : '_nenhuma_'
+    }`,
+    `**Fundo:** ${config.backgroundUrl ? `[link](${config.backgroundUrl})` : '_gradiente desenhado pelo bot_'}`,
+    `**Desligados:** ${off.length ? off.map((t) => `${t.emoji} ${t.label}`).join(' · ') : '_nenhum_'}`,
+  ].join('\n');
+}
+
+/**
+ * Os cinco controles da tela, com o estado atual já marcado.
+ *
+ * Cinco linhas é o teto do Discord, e é o que obriga o véu e os cantos a dividirem
+ * um seletor e os seis liga/desliga a virarem um multi-select: gastar uma linha por
+ * booleano não caberia, e tirar controle da tela contraria o pedido de ser completo.
+ *
+ * O modo do preview viaja no `customId` de tudo porque o painel não guarda estado —
+ * sem isso, mexer numa cor enquanto olha o `/rank` jogaria a tela de volta no `/top`.
+ *
+ * @param {import('../utils/levels/types').LevelsConfig} config
+ * @param {'top'|'rank'} mode
+ */
+function appearanceComponents(config, mode) {
+  const theme = config.theme;
+  const other = mode === 'rank' ? 'top' : 'rank';
+
+  const presetOptions = Object.entries(THEME_PRESETS).map(([key, preset]) => ({
+    label: preset.label,
+    value: key,
+    emoji: preset.emoji,
+    description: preset.description,
+    default: key === theme.preset,
+  }));
+
+  const accentOptions = [
+    ...Object.entries(ACCENT_COLORS).map(([key, accent]) => ({
+      label: accent.label,
+      value: key,
+      emoji: accent.emoji,
+      description: accent.hex,
+      default: !theme.accentColor && key === theme.accent,
+    })),
+    {
+      label: 'Personalizada (hex)',
+      value: ACCENT_CUSTOM,
+      emoji: '🎨',
+      description: theme.accentColor ?? 'abre o formulário de cores',
+      default: Boolean(theme.accentColor),
+    },
+  ];
+
+  // Duas listas num select só (cantos e véu) economiza uma linha de componente, mas
+  // custa o `default`: são dois ajustes independentes num menu de escolha única, e
+  // marcar os dois estoura o `maxValues` — o Discord recusa a mensagem inteira. O
+  // estado atual dos dois vai no placeholder, que é lido antes de abrir a lista.
+  const styleOptions = [
+    ...Object.entries(CORNER_STYLES).map(([key, corner]) => ({
+      label: `Cantos ${corner.label.toLowerCase()}`,
+      value: `corner-${key}`,
+      emoji: corner.emoji,
+      description: key === theme.corners ? 'em uso agora' : undefined,
+    })),
+    ...VEIL_STEPS.map((step) => ({
+      label: `Véu do fundo ${step}%`,
+      value: `veil-${step}`,
+      emoji: '🌫️',
+      description:
+        step === theme.veil ? 'em uso agora' : step === 0 ? 'fundo sem escurecer' : undefined,
+    })),
+  ];
+
+  return [
+    new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`${PREFIX}ap-preset:${mode}`)
+        .setPlaceholder('🎨 Tema das cores')
+        .addOptions(presetOptions)
+    ),
+    new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`${PREFIX}ap-accent:${mode}`)
+        .setPlaceholder('✨ Cor de destaque (barra e faixas)')
+        .addOptions(accentOptions)
+    ),
+    new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`${PREFIX}ap-toggles:${mode}`)
+        .setPlaceholder('👁️ Elementos visíveis')
+        .setMinValues(0)
+        .setMaxValues(THEME_TOGGLES.length)
+        .addOptions(
+          THEME_TOGGLES.map((toggle) => ({
+            label: toggle.label,
+            value: toggle.key,
+            emoji: toggle.emoji,
+            description: toggle.description,
+            default: Boolean(theme[toggle.key]),
+          }))
+        )
+    ),
+    new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`${PREFIX}ap-style:${mode}`)
+        .setPlaceholder(`🔲 Cantos e véu — hoje: ${CORNER_STYLES[theme.corners].label.toLowerCase()}, ${theme.veil}%`)
+        .addOptions(styleOptions)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${PREFIX}ap-edit:${mode}`)
+        .setLabel('Textos e imagem')
+        .setEmoji('✏️')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(`${PREFIX}ap-mode:${other}`)
+        .setLabel(other === 'rank' ? 'Ver /rank' : 'Ver /top')
+        .setEmoji('🔁')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${PREFIX}ap-reset:${mode}`)
+        .setLabel('Voltar ao padrão')
+        .setEmoji('♻️')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`${PREFIX}view:home`).setLabel('Voltar').setEmoji('↩️').setStyle(ButtonStyle.Secondary)
+    ),
+  ];
+}
+
+/**
+ * Tela de aparência, com o preview anexado quando existe.
+ *
+ * @param {import('../utils/levels/types').LevelsConfig} config
+ * @param {import('discord.js').Guild} guild
+ * @param {string} notice
+ * @param {{ image: Buffer|null, demo: boolean, signature: string }|null} preview
+ * @param {'top'|'rank'} mode
+ */
+function appearancePayload(config, guild, notice, preview = null, mode = 'top') {
   const fonts = checkCanvasFonts();
 
   const embed = baseEmbed({
     title: '🎨 Aparência do ranking',
     description: [
-      'O `/top` e o `/rank` respondem com uma imagem gerada pelo bot. Aqui dá para trocar o fundo dela e escrever uma frase no topo.',
+      `Tudo aqui vale para o \`/top\` e para o \`/rank\`, e é salvo na hora. A imagem abaixo é a prévia do **/${mode}** com as escolhas atuais.`,
       '',
-      `**Imagem de fundo:** ${config.backgroundUrl ? `[link](${config.backgroundUrl})` : '_padrão desenhado pelo bot_'}`,
-      `**Frase do topo:** ${config.headline ? `“${config.headline}”` : '_nenhuma_'}`,
+      appearanceSummary(config),
       '',
-      'A URL precisa ser `https`, apontar para uma imagem em endereço público e caber em ' +
-        `${Math.round(MAX_BACKGROUND_BYTES / 1024 / 1024)} MB. A imagem é cortada para cobrir o card, e um véu escuro entra por cima dela para o texto continuar legível.`,
-      fonts.ok ? '' : `\n⚠️ ${fonts.reason}`,
+      preview?.demo
+        ? '_A prévia completa o ranking com participantes de exemplo — o servidor ainda não tem gente suficiente._'
+        : '',
+      preview && !preview.image ? '⚠️ Não foi possível desenhar a prévia agora; os ajustes continuam sendo salvos.' : '',
+      fonts.ok ? '' : `⚠️ ${fonts.reason}`,
     ]
       .filter(Boolean)
       .join('\n'),
-    footer: `Frase: até ${LIMITS.headlineChars} caracteres`,
+    footer: `Título: até ${LIMITS.titleChars} caracteres · frase: até ${LIMITS.headlineChars} · a cor do texto é escolhida automaticamente para contrastar com o papel`,
   });
 
   return {
     content: notice || '',
     embeds: [embed],
-    components: [
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`${PREFIX}ap-edit`)
-          .setLabel('Editar')
-          .setEmoji('✏️')
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId(`${PREFIX}ap-reset`)
-          .setLabel('Voltar ao padrão')
-          .setEmoji('♻️')
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(!config.backgroundUrl && !config.headline),
-        new ButtonBuilder().setCustomId(`${PREFIX}view:home`).setLabel('Voltar').setEmoji('↩️').setStyle(ButtonStyle.Secondary)
-      ),
-    ],
+    components: appearanceComponents(config, mode),
+    // O nome carrega a assinatura do tema: o cliente do Discord guarda anexo por
+    // nome e, com nome fixo, reexibiria a prévia anterior a cada ajuste.
+    files: preview?.image ? [new AttachmentBuilder(preview.image, { name: `preview-${mode}-${previewTag(preview)}.png` })] : [],
+    attachments: [],
     allowedMentions: { parse: [] },
   };
+}
+
+/** Sufixo curto e estável do nome do arquivo, derivado da assinatura do visual. */
+function previewTag(preview) {
+  let hash = 0;
+  for (const char of preview.signature) hash = (hash * 31 + char.charCodeAt(0)) % 0xffffffff;
+  return hash.toString(36);
 }
 
 // ---------------------------------------------------------------------------
@@ -420,18 +590,26 @@ function rewardsPayload(config, guild, notice) {
  * @param {import('discord.js').Guild} guild
  * @param {'home'|'announce'|'exclusions'|'rewards'|'appearance'} view
  * @param {string} [notice] linha de retorno da última ação
+ * @param {{ image: Buffer|null, demo: boolean, signature: string }|null} [preview] prévia da aparência
+ * @param {'top'|'rank'} [mode] qual imagem a prévia mostra
  */
-function buildPanelPayload(config, guild, view = 'home', notice = '') {
-  if (view === 'announce') return announcePayload(config, guild, notice);
-  if (view === 'exclusions') return exclusionsPayload(config, guild, notice);
-  if (view === 'rewards') return rewardsPayload(config, guild, notice);
-  if (view === 'appearance') return appearancePayload(config, guild, notice);
+function buildPanelPayload(config, guild, view = 'home', notice = '', preview = null, mode = 'top') {
+  if (view === 'appearance') return appearancePayload(config, guild, notice, preview, mode);
+
+  // As outras telas limpam o anexo: sem isto a prévia da aparência ficaria pendurada
+  // na mensagem depois de o admin voltar para a tela inicial.
+  const clean = { files: [], attachments: [] };
+
+  if (view === 'announce') return { ...announcePayload(config, guild, notice), ...clean };
+  if (view === 'exclusions') return { ...exclusionsPayload(config, guild, notice), ...clean };
+  if (view === 'rewards') return { ...rewardsPayload(config, guild, notice), ...clean };
 
   return {
     content: notice || '🔧 **Painel de níveis** — só você vê isto.',
     embeds: [homeEmbed(config, guild)],
     components: homeComponents(config),
     allowedMentions: { parse: [] },
+    ...clean,
   };
 }
 
@@ -444,6 +622,38 @@ function applyChange(interaction, config, changes, notice, view = 'home') {
 /** Redesenha sem gravar nada (navegação e avisos). */
 function showView(interaction, config, view, notice = '') {
   return safeAck(interaction, () => interaction.update(buildPanelPayload(config, interaction.guild, view, notice)));
+}
+
+/**
+ * Grava uma mudança de aparência e redesenha a tela **com a prévia nova**.
+ *
+ * `deferUpdate()` antes de desenhar, e não `update()` direto: o render do canvas
+ * baixa avatares e codifica um PNG, o que não cabe nos 3 s do token — o mesmo motivo
+ * que já obriga a paginação do `/top` a deferir.
+ *
+ * @param {import('discord.js').MessageComponentInteraction|import('discord.js').ModalSubmitInteraction} interaction
+ * @param {import('../utils/levels/types').LevelsConfig} config
+ * @param {object|null} changes alterações a gravar, ou `null` para só redesenhar
+ * @param {string} notice
+ * @param {'top'|'rank'} mode
+ */
+async function applyAppearance(interaction, config, changes, notice, mode) {
+  if (!(await safeAck(interaction, () => interaction.deferUpdate()))) return undefined;
+
+  const saved = changes ? saveLevelsConfig(interaction.guild.id, { ...config, ...changes }) : config;
+  const preview = await renderAppearancePreview({
+    guild: interaction.guild,
+    member: interaction.member && 'displayName' in interaction.member ? interaction.member : null,
+    config: saved,
+    mode,
+  });
+
+  return interaction.editReply(buildPanelPayload(saved, interaction.guild, 'appearance', notice, preview, mode));
+}
+
+/** Mesma alteração de sempre, mas só no objeto `theme`. */
+function applyTheme(interaction, config, patch, notice, mode) {
+  return applyAppearance(interaction, config, { theme: { ...config.theme, ...patch } }, notice, mode);
 }
 
 // ---------------------------------------------------------------------------
@@ -515,11 +725,43 @@ function openRewardModal(interaction) {
   return interaction.showModal(modal).catch(swallowAckFailure('levels-setup', interaction));
 }
 
-function openAppearanceModal(interaction, config) {
+/**
+ * Modal dos campos que não cabem em seletor: os dois textos, a URL e as duas cores.
+ *
+ * As cores dividem um campo só porque o modal aceita cinco linhas e o painel precisa
+ * dos quatro campos anteriores; `#papel / #destaque` é curto o bastante para caber
+ * numa linha e explícito o bastante para não precisar de legenda.
+ *
+ * @param {'top'|'rank'} mode
+ */
+function openAppearanceModal(interaction, config, mode) {
+  const theme = config.theme;
+  const colorPair = [theme.cardColor ?? '', theme.accentColor ?? ''].join(' ').trim();
+
   const modal = new ModalBuilder()
-    .setCustomId(`${PREFIX}modal-appearance`)
-    .setTitle('Aparência do ranking')
+    .setCustomId(`${PREFIX}modal-appearance:${mode}`)
+    .setTitle('Textos e imagem do ranking')
     .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('title')
+          .setLabel('Título — vazio: “Ranking de XP”')
+          .setStyle(TextInputStyle.Short)
+          .setMaxLength(LIMITS.titleChars)
+          .setRequired(false)
+          .setPlaceholder('Ranking de XP')
+          .setValue(theme.title ?? '')
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('headline')
+          .setLabel('Frase do topo — vazio: nenhuma')
+          .setStyle(TextInputStyle.Short)
+          .setMaxLength(LIMITS.headlineChars)
+          .setRequired(false)
+          .setPlaceholder('Quem mais conversou por aqui')
+          .setValue(config.headline ?? '')
+      ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId('background')
@@ -532,13 +774,13 @@ function openAppearanceModal(interaction, config) {
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId('headline')
-          .setLabel('Frase do topo — vazio: nenhuma')
+          .setCustomId('colors')
+          .setLabel('Cores hex: papel destaque — vazio: do tema')
           .setStyle(TextInputStyle.Short)
-          .setMaxLength(LIMITS.headlineChars)
+          .setMaxLength(20)
           .setRequired(false)
-          .setPlaceholder('Quem mais conversou por aqui')
-          .setValue(config.headline ?? '')
+          .setPlaceholder('#e8e6de #2a2c34')
+          .setValue(colorPair)
       )
     );
 
@@ -546,20 +788,44 @@ function openAppearanceModal(interaction, config) {
 }
 
 /**
- * Salva a aparência, **baixando a imagem na hora**.
+ * As duas cores do campo livre.
+ *
+ * Aceita espaço, barra ou vírgula entre elas, e devolve `null` no que não for hex —
+ * `null` é exatamente "usa a cor do tema", então digitar errado volta ao preset em vez
+ * de travar o formulário. Quem valida é o `normalizeHexColor`, o mesmo do banco.
+ *
+ * @param {string} raw
+ * @returns {{ cardColor: string|null, accentColor: string|null }}
+ */
+function parseColorPair(raw) {
+  const parts = String(raw ?? '')
+    .split(/[\s/,;|]+/)
+    .filter(Boolean);
+
+  return {
+    cardColor: normalizeHexColor(parts[0] ?? null),
+    accentColor: normalizeHexColor(parts[1] ?? null),
+  };
+}
+
+/**
+ * Salva os textos, as cores e o fundo — **baixando a imagem na hora**.
  *
  * Validar só o formato da URL deixaria o admin achando que configurou um fundo
  * que na prática nunca vai aparecer — o `/top` cai no fundo desenhado em silêncio
  * de propósito. Então o preço é um download aqui, e em troca a recusa vem com o
  * motivo exato enquanto a pessoa ainda está no painel.
  *
- * URL ruim **não** é salva: a frase é gravada, o fundo anterior fica como estava.
+ * URL ruim **não** é salva: o resto é gravado, o fundo anterior fica como estava.
+ *
+ * @param {'top'|'rank'} mode
  */
-async function submitAppearance(interaction, config) {
-  if (!(await safeAck(interaction, () => interaction.deferUpdate()))) return undefined;
-
+async function submitAppearance(interaction, config, mode) {
   const rawUrl = interaction.fields.getTextInputValue('background').trim();
   const headline = interaction.fields.getTextInputValue('headline');
+  const title = interaction.fields.getTextInputValue('title');
+  const rawColors = interaction.fields.getTextInputValue('colors').trim();
+  const { cardColor, accentColor } = parseColorPair(rawColors);
 
   let backgroundUrl = null;
   let problem = '';
@@ -576,22 +842,38 @@ async function submitAppearance(interaction, config) {
     else problem = result.error;
   }
 
-  const saved = saveLevelsConfig(interaction.guild.id, {
-    ...config,
-    // Fundo recusado mantém o que já estava salvo: perder o fundo antigo por causa
-    // de um erro de digitação no novo seria duas perdas de uma vez.
-    backgroundUrl: problem ? config.backgroundUrl : backgroundUrl,
-    headline,
-  });
-
   const notice = problem
-    ? `⚠️ Fundo não aceito: ${problem} A frase foi salva.`
-    : saved.backgroundUrl
-      ? '🎨 Fundo e frase salvos. Rode `/top` para ver.'
-      : '♻️ Aparência salva com o fundo padrão do bot.';
+    ? `⚠️ Fundo não aceito: ${problem} O resto foi salvo.`
+    : rawColors && !cardColor && !accentColor
+      ? '⚠️ Nenhuma cor reconhecida: use hex como `#e8e6de`. O resto foi salvo.'
+      : '🎨 Aparência salva.';
 
-  return interaction.editReply(buildPanelPayload(saved, interaction.guild, 'appearance', notice));
+  return applyAppearance(
+    interaction,
+    config,
+    {
+      // Fundo recusado mantém o que já estava salvo: perder o fundo antigo por causa
+      // de um erro de digitação no novo seria duas perdas de uma vez.
+      backgroundUrl: problem ? config.backgroundUrl : backgroundUrl,
+      headline,
+      theme: { ...config.theme, title, cardColor, accentColor },
+    },
+    notice,
+    mode
+  );
 }
+
+/**
+ * Qual imagem a prévia mostra, lido do `customId`.
+ *
+ * Só `'rank'` é aceito explicitamente; qualquer outra coisa é `'top'`, que é a tela
+ * de entrada — um `customId` truncado ou de uma versão antiga do painel cai no
+ * padrão em vez de quebrar a interação.
+ *
+ * @param {string|undefined} arg
+ * @returns {'top'|'rank'}
+ */
+const previewMode = (arg) => (arg === 'rank' ? 'rank' : 'top');
 
 /** Ids de cargo em texto livre: aceita `<@&id>`, id puro e listas separadas por linha. */
 const parseRoleIds = (raw) => normalizeIds(String(raw ?? '').match(/\d{17,20}/g) ?? [], LIMITS.rolesPerReward);
@@ -749,8 +1031,14 @@ async function routeLevelsSetup(interaction) {
   const config = getLevelsConfig(interaction.guild.id);
 
   switch (action) {
-    case 'view':
-      return showView(interaction, config, VIEWS.includes(arg) ? arg : 'home');
+    case 'view': {
+      const target = VIEWS.includes(arg) ? arg : 'home';
+      // A aparência abre pelo caminho assíncrono porque já entra com a prévia
+      // desenhada — abrir sem imagem e só mostrá-la no primeiro ajuste faria a tela
+      // parecer quebrada justamente na primeira visita.
+      if (target === 'appearance') return applyAppearance(interaction, config, null, '', 'top');
+      return showView(interaction, config, target);
+    }
 
     case 'toggle':
       return applyChange(
@@ -824,16 +1112,71 @@ async function routeLevelsSetup(interaction) {
       );
 
     case 'ap-edit':
-      return openAppearanceModal(interaction, config);
+      return openAppearanceModal(interaction, config, previewMode(arg));
     case 'modal-appearance':
-      return submitAppearance(interaction, config);
-    case 'ap-reset':
-      return applyChange(
+      return submitAppearance(interaction, config, previewMode(arg));
+    case 'ap-mode':
+      return applyAppearance(interaction, config, null, '', previewMode(arg));
+    case 'ap-preset': {
+      const preset = THEME_PRESETS[interaction.values[0]] ? interaction.values[0] : DEFAULT_THEME.preset;
+      // O hex do papel é limpo junto: ele sobrepõe o preset, e trocar de tema sem
+      // largar a cor antiga deixaria a escolha aparentemente sem efeito.
+      return applyTheme(
         interaction,
         config,
-        { backgroundUrl: null, headline: null },
-        '♻️ Aparência de volta ao padrão: fundo desenhado pelo bot e sem frase.',
-        'appearance'
+        { preset, cardColor: null },
+        `🎨 Tema **${THEME_PRESETS[preset].label}**.`,
+        previewMode(arg)
+      );
+    }
+    case 'ap-accent': {
+      const chosen = interaction.values[0];
+      if (chosen === ACCENT_CUSTOM) return openAppearanceModal(interaction, config, previewMode(arg));
+
+      const accent = ACCENT_COLORS[chosen] ? chosen : DEFAULT_THEME.accent;
+      return applyTheme(
+        interaction,
+        config,
+        { accent, accentColor: null },
+        `✨ Destaque **${ACCENT_COLORS[accent].label}**.`,
+        previewMode(arg)
+      );
+    }
+    case 'ap-toggles': {
+      const enabled = new Set(interaction.values);
+      const patch = Object.fromEntries(THEME_TOGGLES.map((toggle) => [toggle.key, enabled.has(toggle.key)]));
+      const off = THEME_TOGGLES.filter((toggle) => !enabled.has(toggle.key));
+      return applyTheme(
+        interaction,
+        config,
+        patch,
+        off.length ? `👁️ Desligados: ${off.map((t) => t.label.toLowerCase()).join(', ')}.` : '👁️ Todos os elementos ligados.',
+        previewMode(arg)
+      );
+    }
+    case 'ap-style': {
+      const chosen = String(interaction.values[0] ?? '');
+      if (chosen.startsWith('corner-')) {
+        const corners = CORNER_STYLES[chosen.slice(7)] ? chosen.slice(7) : DEFAULT_THEME.corners;
+        return applyTheme(
+          interaction,
+          config,
+          { corners },
+          `🔲 Cantos **${CORNER_STYLES[corners].label.toLowerCase()}**.`,
+          previewMode(arg)
+        );
+      }
+      // Valor cru: `normalizeTheme` gruda na faixa, então não há o que validar aqui.
+      const veil = chosen.slice(5);
+      return applyTheme(interaction, config, { veil }, `🌫️ Véu do fundo em **${veil}%**.`, previewMode(arg));
+    }
+    case 'ap-reset':
+      return applyAppearance(
+        interaction,
+        config,
+        { backgroundUrl: null, headline: null, theme: { ...DEFAULT_THEME } },
+        '♻️ Aparência de volta ao padrão do bot.',
+        previewMode(arg)
       );
 
     case 'rw-add':

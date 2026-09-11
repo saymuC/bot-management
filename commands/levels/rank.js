@@ -47,6 +47,7 @@ module.exports = {
       participants: total,
       headline: config.headline,
       backgroundUrl: config.backgroundUrl,
+      theme: config.theme,
     });
 
     if (image) {

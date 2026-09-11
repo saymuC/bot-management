@@ -15,7 +15,10 @@ const { loadImage } = require('@napi-rs/canvas');
 const { fetchRemoteImage } = require('../../remoteImage');
 const { MAX_BACKGROUND_BYTES } = require('../../../config/levels');
 const { createCache } = require('./cache');
-const { COLORS } = require('./theme');
+const { resolveVisual, withAlpha } = require('./visual');
+
+/** Paleta do tema padrão, para quem chama sem passar tema. */
+const DEFAULT_COLORS = resolveVisual(undefined).colors;
 
 /** @typedef {import('@napi-rs/canvas').SKRSContext2D} Ctx */
 /** @typedef {import('@napi-rs/canvas').Image} CanvasImage */
@@ -83,15 +86,20 @@ function noise(n) {
  * A textura existe porque um gradiente puro em PNG de 1000 px fica com faixas
  * visíveis (banding); os pontos quebram a transição sem virar sujeira.
  *
+ * As três paradas do degradê vêm do preset do tema: é o que faz o fundo desenhado
+ * acompanhar a paleta escolhida em vez de ser sempre grafite.
+ *
  * @param {Ctx} ctx
  * @param {number} width
  * @param {number} height
+ * @param {typeof DEFAULT_COLORS} [colors]
  */
-function drawGeneratedBackground(ctx, width, height) {
+function drawGeneratedBackground(ctx, width, height, colors = DEFAULT_COLORS) {
+  const [from, middle, to] = colors.gradient;
   const gradient = ctx.createLinearGradient(0, 0, width * 0.35, height);
-  gradient.addColorStop(0, '#191b21');
-  gradient.addColorStop(0.55, '#12131a');
-  gradient.addColorStop(1, COLORS.base);
+  gradient.addColorStop(0, from);
+  gradient.addColorStop(0.55, middle);
+  gradient.addColorStop(1, to);
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
 
@@ -130,10 +138,10 @@ function drawGeneratedBackground(ctx, width, height) {
  * o fundo desenhado, e o véu por cima nos dois casos.
  *
  * @param {Ctx} ctx
- * @param {{ width: number, height: number, image?: CanvasImage|null }} options
+ * @param {{ width: number, height: number, image?: CanvasImage|null, colors?: typeof DEFAULT_COLORS }} options
  */
-function paintBackground(ctx, { width, height, image }) {
-  ctx.fillStyle = COLORS.base;
+function paintBackground(ctx, { width, height, image, colors = DEFAULT_COLORS }) {
+  ctx.fillStyle = colors.base;
   ctx.fillRect(0, 0, width, height);
 
   if (image && image.width > 0 && image.height > 0) {
@@ -143,10 +151,10 @@ function paintBackground(ctx, { width, height, image }) {
     const drawHeight = image.height * scale;
     ctx.drawImage(image, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
   } else {
-    drawGeneratedBackground(ctx, width, height);
+    drawGeneratedBackground(ctx, width, height, colors);
   }
 
-  ctx.fillStyle = COLORS.veil;
+  ctx.fillStyle = colors.veil;
   ctx.fillRect(0, 0, width, height);
 }
 
@@ -158,21 +166,23 @@ function paintBackground(ctx, { width, height, image }) {
  * pagaria por isso.
  *
  * @param {Ctx} ctx
- * @param {{ width: number, height: number, top: number, bottom: number }} options
+ * @param {{ width: number, height: number, top: number, bottom: number, colors?: typeof DEFAULT_COLORS }} options
  */
-function paintEdgeScrims(ctx, { width, height, top, bottom }) {
+function paintEdgeScrims(ctx, { width, height, top, bottom, colors = DEFAULT_COLORS }) {
+  const transparent = withAlpha(colors.base, 0);
+
   if (top > 0) {
     const gradient = ctx.createLinearGradient(0, 0, 0, top);
-    gradient.addColorStop(0, COLORS.scrim);
-    gradient.addColorStop(1, 'rgba(9, 10, 13, 0)');
+    gradient.addColorStop(0, colors.scrim);
+    gradient.addColorStop(1, transparent);
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, top);
   }
 
   if (bottom > 0) {
     const gradient = ctx.createLinearGradient(0, height - bottom, 0, height);
-    gradient.addColorStop(0, 'rgba(9, 10, 13, 0)');
-    gradient.addColorStop(1, COLORS.scrim);
+    gradient.addColorStop(0, transparent);
+    gradient.addColorStop(1, colors.scrim);
     ctx.fillStyle = gradient;
     ctx.fillRect(0, height - bottom, width, bottom);
   }

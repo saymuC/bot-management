@@ -10,16 +10,19 @@
  * A altura é calculada a partir do número de linhas, então uma última página com
  * três pessoas sai com três linhas de altura — não com dez e sete buracos.
  *
- * Toda linha é um cartão de papel opaco (ver [theme.js](./theme.js)). Cartão
- * translúcido deixava o fundo do servidor atravessar e o XP ficava ilegível
- * dependendo da imagem configurada.
+ * Toda linha é um cartão de papel opaco. Cartão translúcido deixava o fundo do
+ * servidor atravessar e o XP ficava ilegível dependendo da imagem configurada.
+ *
+ * Nenhuma cor é decidida aqui: o desenho recebe o **visual resolvido** de
+ * [visual.js](./visual.js), que traduz o tema do servidor em paleta e medidas.
  */
 
 const { createCanvas } = require('@napi-rs/canvas');
 const { fontStacks } = require('../../canvasFonts');
 const { xpProgress } = require('../formula');
 const { formatXp } = require('../leaderboard');
-const { TOP, BAR, COLORS } = require('./theme');
+const { TOP } = require('./theme');
+const { resolveVisual } = require('./visual');
 const {
   fillRoundRect,
   roundRectPath,
@@ -39,6 +42,7 @@ const { createCache } = require('./cache');
 /** @typedef {import('@napi-rs/canvas').SKRSContext2D} Ctx */
 /** @typedef {import('@napi-rs/canvas').Image} CanvasImage */
 /** @typedef {{ display: string, body: string, mono: string, strong: string, weight: string }} Fonts */
+/** @typedef {ReturnType<typeof resolveVisual>} Visual */
 
 /**
  * @typedef {Object} LeaderboardEntry
@@ -65,44 +69,51 @@ const CARD_SHADOW = Object.freeze({ color: 'rgba(0, 0, 0, 0.45)', blur: 16, offs
 
 /**
  * Cor da faixa lateral e do número da posição.
+ * @param {Visual} v
  * @param {number} position
  * @returns {string}
  */
-const accentFor = (position) => COLORS.medals[position - 1] ?? COLORS.accentPlain;
+const accentFor = (v, position) => v.colors.medals[position - 1] ?? v.colors.accentPlain;
 
 /**
  * Altura da imagem para uma página.
  *
- * Separado do desenho para poder ser conferido em teste sem canvas nenhum.
+ * Separado do desenho para poder ser conferido em teste sem canvas nenhum. O
+ * terceiro parâmetro existe porque o rodapé desligado não pode reservar altura —
+ * sobraria uma faixa vazia no pé da imagem.
  *
  * @param {number} rowCount linhas normais (fora o destaque)
  * @param {boolean} hasHero a página tem o card de primeiro lugar
+ * @param {typeof TOP} [top] medidas já ajustadas pelo tema
  * @returns {number}
  */
-function cardHeight(rowCount, hasHero) {
+function cardHeight(rowCount, hasHero, top = TOP) {
   const blocks = [];
-  if (hasHero) blocks.push(TOP.heroHeight);
-  for (let i = 0; i < Math.max(0, rowCount); i += 1) blocks.push(TOP.rowHeight);
+  if (hasHero) blocks.push(top.heroHeight);
+  for (let i = 0; i < Math.max(0, rowCount); i += 1) blocks.push(top.rowHeight);
 
   const body = blocks.length
-    ? blocks.reduce((sum, h) => sum + h, 0) + TOP.rowGap * (blocks.length - 1)
-    : TOP.emptyHeight;
+    ? blocks.reduce((sum, h) => sum + h, 0) + top.rowGap * (blocks.length - 1)
+    : top.emptyHeight;
 
-  return TOP.padding * 2 + TOP.headerHeight + body + TOP.footerHeight;
+  return top.padding * 2 + top.headerHeight + body + top.footerHeight;
 }
 
 /**
  * Assinatura da página: muda quando qualquer coisa visível muda.
  *
  * Inclui o XP de cada linha porque é ele que move a barra; inclui a aparência
- * porque trocar o fundo tem de invalidar o que já foi desenhado.
+ * porque trocar o fundo ou o tema tem de invalidar o que já foi desenhado — sem a
+ * assinatura do tema, mudar uma cor devolveria a imagem antiga do cache e o
+ * preview do painel pareceria travado.
  *
- * @param {{ guildId: string, guildName: string, page: number, pages: number, total: number, entries: LeaderboardEntry[], headline?: string|null, backgroundUrl?: string|null }} data
+ * @param {{ guildId: string, guildName: string, page: number, pages: number, total: number, entries: LeaderboardEntry[], headline?: string|null, backgroundUrl?: string|null, theme?: unknown }} data
  * @returns {string}
  */
-function pageSignature({ guildId, guildName, page, pages, total, entries, headline, backgroundUrl }) {
+function pageSignature({ guildId, guildName, page, pages, total, entries, headline, backgroundUrl, theme }) {
   const rows = entries.map((e) => `${e.position}:${e.id}:${e.totalXp}:${e.name}:${e.avatarUrl ?? ''}`).join('|');
-  return [guildId, guildName, page, pages, total, headline ?? '', backgroundUrl ?? '', rows].join('~');
+  const visual = resolveVisual(theme).signature;
+  return [guildId, guildName, page, pages, total, headline ?? '', backgroundUrl ?? '', visual, rows].join('~');
 }
 
 /**
@@ -112,13 +123,15 @@ function pageSignature({ guildId, guildName, page, pages, total, entries, headli
  * que embaralha justamente o dado que a pessoa abriu o `/top` para ler.
  *
  * @param {Ctx} ctx
- * @param {{ x: number, y: number, width: number, height: number, radius: number, band: number }} options
+ * @param {{ v: Visual, x: number, y: number, width: number, height: number, radius: number, band: number }} options
  */
-function drawCardTexture(ctx, { x, y, width, height, radius, band }) {
+function drawCardTexture(ctx, { v, x, y, width, height, radius, band }) {
+  if (!v.flags.showTexture) return;
+
   ctx.save();
   roundRectPath(ctx, x, y, width, height, radius);
   ctx.clip();
-  drawHatch(ctx, { x, y, width: band, height, color: COLORS.inkGhost, gap: 16 });
+  drawHatch(ctx, { x, y, width: band, height, color: v.colors.inkGhost, gap: 16 });
   ctx.restore();
 }
 
@@ -126,28 +139,29 @@ function drawCardTexture(ctx, { x, y, width, height, radius, band }) {
  * Cabeçalho: título, nome do servidor, frase configurada e a página.
  *
  * @param {Ctx} ctx
- * @param {{ fonts: Fonts, width: number, guildName: string, page: number, pages: number, headline?: string|null }} options
+ * @param {{ v: Visual, fonts: Fonts, width: number, guildName: string, page: number, pages: number, headline?: string|null }} options
  */
-function drawHeader(ctx, { fonts, width, guildName, page, pages, headline }) {
-  const left = TOP.padding + 4;
-  const right = width - TOP.padding - 4;
-  const top = TOP.padding;
+function drawHeader(ctx, { v, fonts, width, guildName, page, pages, headline }) {
+  const { colors, top: T } = v;
+  const left = T.padding + 4;
+  const right = width - T.padding - 4;
+  const top = T.padding;
 
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
 
-  ctx.fillStyle = COLORS.pageText;
+  ctx.fillStyle = colors.pageText;
   ctx.font = `${fonts.weight}54px ${fonts.display}`;
-  ctx.fillText('Ranking de XP', left, top + 52);
+  ctx.fillText(fitText(ctx, v.title ?? 'Ranking de XP', width - T.padding * 2 - 230), left, top + 52);
 
   ctx.font = `22px ${fonts.body}`;
-  ctx.fillStyle = COLORS.pageMuted;
-  ctx.fillText(fitText(ctx, guildName, width - TOP.padding * 2 - 220), left, top + 88);
+  ctx.fillStyle = colors.pageMuted;
+  ctx.fillText(fitText(ctx, guildName, width - T.padding * 2 - 220), left, top + 88);
 
   if (headline) {
     ctx.font = `20px ${fonts.body}`;
-    ctx.fillStyle = COLORS.pageFaint;
-    ctx.fillText(fitText(ctx, headline, width - TOP.padding * 2 - 8), left, top + 122);
+    ctx.fillStyle = colors.pageFaint;
+    ctx.fillText(fitText(ctx, headline, width - T.padding * 2 - 8), left, top + 122);
   }
 
   drawPill(ctx, {
@@ -155,31 +169,32 @@ function drawHeader(ctx, { fonts, width, guildName, page, pages, headline }) {
     right,
     centerY: top + 34,
     font: `${fonts.weight}20px ${fonts.strong}`,
-    fill: COLORS.pageText,
-    background: 'rgba(244, 243, 239, 0.10)',
-    stroke: COLORS.rule,
+    fill: colors.pageText,
+    background: colors.pageWash,
+    stroke: colors.rule,
     height: 40,
     paddingX: 18,
   });
 
   // Régua: fecha o cabeçalho e faz o primeiro cartão parecer apoiado nela.
-  const ruleY = top + TOP.headerHeight - 16;
-  ctx.fillStyle = COLORS.rule;
-  ctx.fillRect(left, ruleY, width - TOP.padding * 2 - 8, 1);
+  const ruleY = top + T.headerHeight - 16;
+  ctx.fillStyle = colors.rule;
+  ctx.fillRect(left, ruleY, width - T.padding * 2 - 8, 1);
 }
 
 /**
- * Card do primeiro lugar: mais alto, mais claro e com o número de marca d'água.
+ * Card do primeiro lugar: mais alto, mais claro e com o selo em destaque.
  *
  * @param {Ctx} ctx
- * @param {{ fonts: Fonts, width: number, y: number, entry: LeaderboardEntry, avatar: CanvasImage|null }} options
+ * @param {{ v: Visual, fonts: Fonts, width: number, y: number, entry: LeaderboardEntry, avatar: CanvasImage|null }} options
  */
-function drawHeroRow(ctx, { fonts, width, y, entry, avatar }) {
-  const x = TOP.padding;
-  const cardWidth = width - TOP.padding * 2;
-  const height = TOP.heroHeight;
-  const radius = TOP.radius + 4;
-  const gold = COLORS.medals[0];
+function drawHeroRow(ctx, { v, fonts, width, y, entry, avatar }) {
+  const { colors, flags, top: T, bar } = v;
+  const x = T.padding;
+  const cardWidth = width - T.padding * 2;
+  const height = T.heroHeight;
+  const radius = T.radius ? T.radius + 4 : 0;
+  const gold = colors.medals[0];
 
   fillRoundRect(ctx, {
     x,
@@ -187,12 +202,12 @@ function drawHeroRow(ctx, { fonts, width, y, entry, avatar }) {
     width: cardWidth,
     height,
     radius,
-    fill: COLORS.hero,
-    stroke: COLORS.heroStroke,
-    shadow: CARD_SHADOW,
+    fill: colors.hero,
+    stroke: colors.heroStroke,
+    shadow: flags.showShadow ? CARD_SHADOW : undefined,
   });
-  drawAccent(ctx, { x, y, width: cardWidth, height, radius, thickness: TOP.accentWidth, fill: gold });
-  drawCardTexture(ctx, { x, y, width: cardWidth, height, radius, band: 250 });
+  drawAccent(ctx, { x, y, width: cardWidth, height, radius, thickness: T.accentWidth, fill: gold });
+  drawCardTexture(ctx, { v, x, y, width: cardWidth, height, radius, band: flags.showAvatars ? 250 : 150 });
 
   const progress = xpProgress(entry.totalXp);
   const centerY = y + height / 2;
@@ -205,34 +220,38 @@ function drawHeroRow(ctx, { fonts, width, y, entry, avatar }) {
     cy: centerY,
     radius: 34,
     font: `${fonts.weight}36px ${fonts.display}`,
-    fill: COLORS.hero,
+    fill: colors.hero,
     background: gold,
   });
 
-  drawAvatar(ctx, {
-    image: avatar,
-    cx: x + 190,
-    cy: centerY,
-    radius: 56,
-    initial: initialOf(entry.name),
-    family: fonts.body,
-    ring: gold,
-    fallbackFill: COLORS.track,
-    fallbackColor: COLORS.inkMuted,
-  });
+  if (flags.showAvatars) {
+    drawAvatar(ctx, {
+      image: avatar,
+      cx: x + 190,
+      cy: centerY,
+      radius: 56,
+      initial: initialOf(entry.name),
+      family: fonts.body,
+      ring: gold,
+      fallbackFill: colors.track,
+      fallbackColor: colors.inkMuted,
+    });
+  }
 
-  const textLeft = x + 266;
-  const textRight = x + cardWidth - TOP.inner;
+  // Sem avatar o texto avança para onde ele começava: um vão de 130 px no meio do
+  // cartão de destaque leria como imagem que não carregou.
+  const textLeft = x + (flags.showAvatars ? 266 : 134);
+  const textRight = x + cardWidth - T.inner;
 
   ctx.textAlign = 'right';
   ctx.font = `${fonts.weight}32px ${fonts.strong}`;
-  ctx.fillStyle = COLORS.ink;
+  ctx.fillStyle = colors.ink;
   const xpLabel = `${formatXp(entry.totalXp)} XP`;
   ctx.fillText(xpLabel, textRight, y + 62);
   const xpWidth = ctx.measureText(xpLabel).width;
 
   ctx.font = `19px ${fonts.body}`;
-  ctx.fillStyle = COLORS.inkMuted;
+  ctx.fillStyle = colors.inkMuted;
   ctx.fillText(
     progress.xpForNextLevel > 0
       ? `${formatXp(progress.xpIntoLevel)} / ${formatXp(progress.xpForNextLevel)}`
@@ -243,23 +262,28 @@ function drawHeroRow(ctx, { fonts, width, y, entry, avatar }) {
 
   ctx.textAlign = 'left';
   ctx.font = `${fonts.weight}38px ${fonts.strong}`;
-  ctx.fillStyle = COLORS.ink;
+  ctx.fillStyle = colors.ink;
   ctx.fillText(fitText(ctx, entry.name, textRight - textLeft - xpWidth - 28), textLeft, y + 64);
 
   ctx.font = `${fonts.weight}22px ${fonts.strong}`;
-  ctx.fillStyle = COLORS.inkMuted;
+  ctx.fillStyle = colors.inkMuted;
   ctx.fillText(`Nível ${progress.level}`, textLeft, y + 100);
 
-  drawBar(ctx, {
-    x: textLeft,
-    y: y + 118,
-    width: textRight - textLeft,
-    height: BAR.heroHeight,
-    percent: progress.percent,
-  });
+  if (flags.showBars) {
+    drawBar(ctx, {
+      x: textLeft,
+      y: y + 118,
+      width: textRight - textLeft,
+      height: bar.heroHeight,
+      percent: progress.percent,
+      track: colors.track,
+      from: colors.barFrom,
+      to: colors.barTo,
+    });
+  }
 
   ctx.font = `17px ${fonts.body}`;
-  ctx.fillStyle = COLORS.inkFaint;
+  ctx.fillStyle = colors.inkFaint;
   ctx.fillText(
     progress.xpForNextLevel > 0
       ? `faltam ${formatXp(Math.max(0, progress.xpForNextLevel - progress.xpIntoLevel))} XP`
@@ -277,14 +301,15 @@ function drawHeroRow(ctx, { fonts, width, y, entry, avatar }) {
  * Linha comum do ranking.
  *
  * @param {Ctx} ctx
- * @param {{ fonts: Fonts, width: number, y: number, entry: LeaderboardEntry, avatar: CanvasImage|null }} options
+ * @param {{ v: Visual, fonts: Fonts, width: number, y: number, entry: LeaderboardEntry, avatar: CanvasImage|null }} options
  */
-function drawRow(ctx, { fonts, width, y, entry, avatar }) {
-  const x = TOP.padding;
-  const cardWidth = width - TOP.padding * 2;
-  const height = TOP.rowHeight;
-  const radius = TOP.radius;
-  const accent = accentFor(entry.position);
+function drawRow(ctx, { v, fonts, width, y, entry, avatar }) {
+  const { colors, flags, top: T } = v;
+  const x = T.padding;
+  const cardWidth = width - T.padding * 2;
+  const height = T.rowHeight;
+  const radius = T.radius;
+  const accent = accentFor(v, entry.position);
   const isPodium = entry.position <= 3;
 
   fillRoundRect(ctx, {
@@ -293,12 +318,12 @@ function drawRow(ctx, { fonts, width, y, entry, avatar }) {
     width: cardWidth,
     height,
     radius,
-    fill: COLORS.card,
-    stroke: COLORS.cardStroke,
-    shadow: CARD_SHADOW,
+    fill: colors.card,
+    stroke: colors.cardStroke,
+    shadow: flags.showShadow ? CARD_SHADOW : undefined,
   });
-  drawAccent(ctx, { x, y, width: cardWidth, height, radius, thickness: TOP.accentWidth, fill: accent });
-  drawCardTexture(ctx, { x, y, width: cardWidth, height, radius, band: 165 });
+  drawAccent(ctx, { x, y, width: cardWidth, height, radius, thickness: T.accentWidth, fill: accent });
+  drawCardTexture(ctx, { v, x, y, width: cardWidth, height, radius, band: flags.showAvatars ? 165 : 100 });
 
   const progress = xpProgress(entry.totalXp);
   const centerY = y + height / 2;
@@ -309,34 +334,36 @@ function drawRow(ctx, { fonts, width, y, entry, avatar }) {
     cy: centerY,
     radius: 26,
     font: `${fonts.weight}${entry.position >= 100 ? 20 : 25}px ${fonts.display}`,
-    fill: isPodium ? COLORS.card : COLORS.ink,
-    background: isPodium ? accent : COLORS.inkGhost,
+    fill: isPodium ? colors.card : colors.ink,
+    background: isPodium ? accent : colors.inkGhost,
   });
 
-  drawAvatar(ctx, {
-    image: avatar,
-    cx: x + 122,
-    cy: centerY,
-    radius: 34,
-    initial: initialOf(entry.name),
-    family: fonts.body,
-    ring: isPodium ? accent : COLORS.cardStroke,
-    fallbackFill: COLORS.track,
-    fallbackColor: COLORS.inkMuted,
-  });
+  if (flags.showAvatars) {
+    drawAvatar(ctx, {
+      image: avatar,
+      cx: x + 122,
+      cy: centerY,
+      radius: 34,
+      initial: initialOf(entry.name),
+      family: fonts.body,
+      ring: isPodium ? accent : colors.cardStroke,
+      fallbackFill: colors.track,
+      fallbackColor: colors.inkMuted,
+    });
+  }
 
-  const textLeft = x + 176;
-  const textRight = x + cardWidth - TOP.inner;
+  const textLeft = x + (flags.showAvatars ? 176 : 96);
+  const textRight = x + cardWidth - T.inner;
 
   ctx.textAlign = 'right';
   ctx.font = `${fonts.weight}24px ${fonts.strong}`;
-  ctx.fillStyle = COLORS.ink;
+  ctx.fillStyle = colors.ink;
   const xpLabel = `${formatXp(entry.totalXp)} XP`;
   ctx.fillText(xpLabel, textRight, y + 44);
   const xpWidth = ctx.measureText(xpLabel).width;
 
   ctx.font = `17px ${fonts.body}`;
-  ctx.fillStyle = COLORS.inkFaint;
+  ctx.fillStyle = colors.inkFaint;
   ctx.fillText(
     progress.xpForNextLevel > 0
       ? `${formatXp(progress.xpIntoLevel)} / ${formatXp(progress.xpForNextLevel)}`
@@ -347,45 +374,56 @@ function drawRow(ctx, { fonts, width, y, entry, avatar }) {
 
   ctx.textAlign = 'left';
   ctx.font = `${fonts.weight}27px ${fonts.strong}`;
-  ctx.fillStyle = COLORS.ink;
+  ctx.fillStyle = colors.ink;
   ctx.fillText(fitText(ctx, entry.name, textRight - textLeft - xpWidth - 28), textLeft, y + 44);
 
   ctx.font = `18px ${fonts.body}`;
-  ctx.fillStyle = COLORS.inkMuted;
+  ctx.fillStyle = colors.inkMuted;
   ctx.fillText(`Nível ${progress.level}`, textLeft, y + 74);
 
-  drawBar(ctx, { x: textLeft, y: y + 86, width: textRight - textLeft, percent: progress.percent });
+  if (flags.showBars) {
+    drawBar(ctx, {
+      x: textLeft,
+      y: y + 86,
+      width: textRight - textLeft,
+      percent: progress.percent,
+      track: colors.track,
+      from: colors.barFrom,
+      to: colors.barTo,
+    });
+  }
 }
 
 /**
  * Bloco do ranking vazio. Existe para a imagem não ter um vão sem explicação.
  *
  * @param {Ctx} ctx
- * @param {{ fonts: Fonts, width: number, y: number }} options
+ * @param {{ v: Visual, fonts: Fonts, width: number, y: number }} options
  */
-function drawEmptyBlock(ctx, { fonts, width, y }) {
-  const x = TOP.padding;
-  const cardWidth = width - TOP.padding * 2;
+function drawEmptyBlock(ctx, { v, fonts, width, y }) {
+  const { colors, flags, top: T } = v;
+  const x = T.padding;
+  const cardWidth = width - T.padding * 2;
 
   fillRoundRect(ctx, {
     x,
     y,
     width: cardWidth,
-    height: TOP.emptyHeight,
-    radius: TOP.radius,
-    fill: COLORS.card,
-    stroke: COLORS.cardStroke,
-    shadow: CARD_SHADOW,
+    height: T.emptyHeight,
+    radius: T.radius,
+    fill: colors.card,
+    stroke: colors.cardStroke,
+    shadow: flags.showShadow ? CARD_SHADOW : undefined,
   });
 
   ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
   ctx.font = `${fonts.weight}26px ${fonts.strong}`;
-  ctx.fillStyle = COLORS.ink;
+  ctx.fillStyle = colors.ink;
   ctx.fillText('Ninguém pontuou ainda', x + cardWidth / 2, y + 56);
 
   ctx.font = `18px ${fonts.body}`;
-  ctx.fillStyle = COLORS.inkMuted;
+  ctx.fillStyle = colors.inkMuted;
   ctx.fillText(
     'Com o sistema de níveis ligado, o ranking aparece na primeira conversa.',
     x + cardWidth / 2,
@@ -398,26 +436,27 @@ function drawEmptyBlock(ctx, { fonts, width, y }) {
  * Rodapé com o total de participantes.
  *
  * @param {Ctx} ctx
- * @param {{ fonts: Fonts, width: number, height: number, total: number, pageSize: number }} options
+ * @param {{ v: Visual, fonts: Fonts, width: number, height: number, total: number, pageSize: number }} options
  */
-function drawFooter(ctx, { fonts, width, height, total, pageSize }) {
-  const y = height - TOP.padding - 10;
+function drawFooter(ctx, { v, fonts, width, height, total, pageSize }) {
+  const { colors, top: T } = v;
+  const y = height - T.padding - 10;
 
   ctx.textBaseline = 'alphabetic';
   ctx.textAlign = 'left';
   ctx.font = `17px ${fonts.body}`;
-  ctx.fillStyle = COLORS.pageFaint;
-  ctx.fillText(`${formatXp(total)} participante(s) · ${pageSize} por página`, TOP.padding + 4, y);
+  ctx.fillStyle = colors.pageFaint;
+  ctx.fillText(`${formatXp(total)} participante(s) · ${pageSize} por página`, T.padding + 4, y);
 
   ctx.textAlign = 'right';
-  ctx.fillText('/top', width - TOP.padding - 4, y);
+  ctx.fillText('/top', width - T.padding - 4, y);
   ctx.textAlign = 'left';
 }
 
 /**
  * PNG de uma página do ranking, ou `null` quando não é possível desenhar.
  *
- * @param {{ guildId: string, guildName: string, page: number, pages: number, total: number, pageSize: number, entries: LeaderboardEntry[], headline?: string|null, backgroundUrl?: string|null }} data
+ * @param {{ guildId: string, guildName: string, page: number, pages: number, total: number, pageSize: number, entries: LeaderboardEntry[], headline?: string|null, backgroundUrl?: string|null, theme?: unknown }} data
  * @returns {Promise<Buffer|null>}
  */
 async function renderLeaderboardCard(data) {
@@ -429,31 +468,36 @@ async function renderLeaderboardCard(data) {
   if (cached) return cached;
 
   try {
+    const v = resolveVisual(data.theme);
+    const T = v.top;
+
     const entries = data.entries ?? [];
     // O destaque é o primeiro lugar de verdade, não o primeiro da página: na
     // página 2 a posição 11 é uma linha comum como qualquer outra.
     const hasHero = entries.length > 0 && entries[0].position === 1;
     const rows = hasHero ? entries.slice(1) : entries;
 
-    const width = TOP.width;
-    const height = cardHeight(rows.length, hasHero);
+    const width = T.width;
+    const height = cardHeight(rows.length, hasHero, T);
 
     const [background, avatars] = await Promise.all([
       loadBackgroundImage(data.backgroundUrl),
-      loadAvatars(entries.map((entry) => entry.avatarUrl ?? null)),
+      v.flags.showAvatars ? loadAvatars(entries.map((entry) => entry.avatarUrl ?? null)) : new Map(),
     ]);
 
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
 
-    paintBackground(ctx, { width, height, image: background });
+    paintBackground(ctx, { width, height, image: background, colors: v.colors });
     paintEdgeScrims(ctx, {
       width,
       height,
-      top: TOP.padding + TOP.headerHeight,
-      bottom: TOP.footerHeight + TOP.padding,
+      top: T.padding + T.headerHeight,
+      bottom: T.footerHeight ? T.footerHeight + T.padding : T.padding,
+      colors: v.colors,
     });
     drawHeader(ctx, {
+      v,
       fonts,
       width,
       guildName: data.guildName,
@@ -462,23 +506,32 @@ async function renderLeaderboardCard(data) {
       headline: data.headline,
     });
 
-    let y = TOP.padding + TOP.headerHeight;
+    let y = T.padding + T.headerHeight;
 
     if (!entries.length) {
-      drawEmptyBlock(ctx, { fonts, width, y });
+      drawEmptyBlock(ctx, { v, fonts, width, y });
     } else {
       if (hasHero) {
-        drawHeroRow(ctx, { fonts, width, y, entry: entries[0], avatar: avatars.get(entries[0].avatarUrl ?? '') ?? null });
-        y += TOP.heroHeight + TOP.rowGap;
+        drawHeroRow(ctx, {
+          v,
+          fonts,
+          width,
+          y,
+          entry: entries[0],
+          avatar: avatars.get(entries[0].avatarUrl ?? '') ?? null,
+        });
+        y += T.heroHeight + T.rowGap;
       }
 
       for (const entry of rows) {
-        drawRow(ctx, { fonts, width, y, entry, avatar: avatars.get(entry.avatarUrl ?? '') ?? null });
-        y += TOP.rowHeight + TOP.rowGap;
+        drawRow(ctx, { v, fonts, width, y, entry, avatar: avatars.get(entry.avatarUrl ?? '') ?? null });
+        y += T.rowHeight + T.rowGap;
       }
     }
 
-    drawFooter(ctx, { fonts, width, height, total: data.total, pageSize: data.pageSize });
+    if (v.flags.showFooter) {
+      drawFooter(ctx, { v, fonts, width, height, total: data.total, pageSize: data.pageSize });
+    }
 
     return pageCache.set(signature, canvas.toBuffer('image/png'));
   } catch (err) {

@@ -13,7 +13,16 @@
 
 const { getGuildConfig, setGuildConfig } = require('../../database/db');
 const { checkPublicUrl } = require('../remoteImage');
-const { MAX_LEVEL, LIMITS, REWARD_MODES, DEFAULT_CONFIG } = require('../../config/levels');
+const {
+  MAX_LEVEL,
+  LIMITS,
+  REWARD_MODES,
+  THEME_PRESETS,
+  ACCENT_COLORS,
+  CORNER_STYLES,
+  DEFAULT_THEME,
+  DEFAULT_CONFIG,
+} = require('../../config/levels');
 
 const isSnowflake = (value) => typeof value === 'string' && /^\d{17,20}$/.test(value);
 
@@ -68,12 +77,66 @@ function normalizeBackgroundUrl(raw) {
  * perder o texto que a pessoa escreveu.
  *
  * @param {unknown} raw
+ * @param {number} [maxChars] limite de caracteres; o padrão é o da frase do topo
  * @returns {string|null}
  */
-function normalizeHeadline(raw) {
+function normalizeHeadline(raw, maxChars = LIMITS.headlineChars) {
   if (raw === null || raw === undefined) return null;
-  const text = String(raw).replace(/\s+/g, ' ').trim().slice(0, LIMITS.headlineChars);
+  const text = String(raw).replace(/\s+/g, ' ').trim().slice(0, maxChars);
   return text || null;
+}
+
+/**
+ * Cor em `#rrggbb` minúsculo, ou `null`.
+ *
+ * Aceita as formas que uma pessoa digita — sem `#`, em três dígitos, em
+ * maiúsculas — e recusa qualquer outra coisa. É a única porta por onde uma cor
+ * escolhida pelo admin chega ao canvas, então recusar em vez de tentar consertar
+ * é o comportamento certo: `fillStyle` com string inválida é silenciosamente
+ * ignorado pelo canvas, e o resultado seria um cartão faltando cor sem
+ * explicação.
+ *
+ * @param {unknown} raw
+ * @returns {string|null}
+ */
+function normalizeHexColor(raw) {
+  if (raw === null || raw === undefined) return null;
+
+  const text = String(raw).trim().toLowerCase().replace(/^#/, '');
+  if (/^[0-9a-f]{3}$/.test(text)) return `#${text[0]}${text[0]}${text[1]}${text[1]}${text[2]}${text[2]}`;
+  if (/^[0-9a-f]{6}$/.test(text)) return `#${text}`;
+  return null;
+}
+
+/**
+ * Aparência normalizada.
+ *
+ * Campo a campo: chave fora do catálogo volta ao default, cor inválida vira
+ * `null` (o preset assume) e o véu gruda na faixa. Nada aqui lança — a tela de
+ * aparência é justamente onde o admin conserta um tema ruim, e ela não pode
+ * depender de o tema estar bom.
+ *
+ * @param {unknown} raw
+ * @returns {import('./types').LevelsTheme}
+ */
+function normalizeTheme(raw) {
+  const source = raw && typeof raw === 'object' ? /** @type {any} */ (raw) : {};
+
+  return {
+    preset: Object.hasOwn(THEME_PRESETS, source.preset) ? source.preset : DEFAULT_THEME.preset,
+    accent: Object.hasOwn(ACCENT_COLORS, source.accent) ? source.accent : DEFAULT_THEME.accent,
+    cardColor: normalizeHexColor(source.cardColor),
+    accentColor: normalizeHexColor(source.accentColor),
+    veil: clampInt(source.veil, LIMITS.veil, DEFAULT_THEME.veil),
+    corners: Object.hasOwn(CORNER_STYLES, source.corners) ? source.corners : DEFAULT_THEME.corners,
+    title: normalizeHeadline(source.title, LIMITS.titleChars),
+    showAvatars: normalizeBool(source.showAvatars, DEFAULT_THEME.showAvatars),
+    showBars: normalizeBool(source.showBars, DEFAULT_THEME.showBars),
+    showTexture: normalizeBool(source.showTexture, DEFAULT_THEME.showTexture),
+    showShadow: normalizeBool(source.showShadow, DEFAULT_THEME.showShadow),
+    showMedals: normalizeBool(source.showMedals, DEFAULT_THEME.showMedals),
+    showFooter: normalizeBool(source.showFooter, DEFAULT_THEME.showFooter),
+  };
 }
 
 /**
@@ -148,6 +211,7 @@ function normalizeConfig(raw) {
     rewards: normalizeRewards(source.rewards),
     backgroundUrl: normalizeBackgroundUrl(source.backgroundUrl),
     headline: normalizeHeadline(source.headline),
+    theme: normalizeTheme(source.theme),
   };
 }
 
@@ -225,6 +289,8 @@ module.exports = {
   normalizeRewards,
   normalizeBackgroundUrl,
   normalizeHeadline,
+  normalizeHexColor,
+  normalizeTheme,
   normalizeConfig,
   getLevelsConfig,
   saveLevelsConfig,
