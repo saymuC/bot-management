@@ -1,34 +1,14 @@
 const http = require('node:http');
 const crypto = require('node:crypto');
-const { db } = require('../database/db');
-
-// tokens OAuth de usuários que autorizaram via botão de verificação
-db.exec(`
-CREATE TABLE IF NOT EXISTS oauth_users (
-  user_id TEXT PRIMARY KEY,
-  guild_id TEXT,
-  access_token TEXT NOT NULL,
-  refresh_token TEXT,
-  expires_at TEXT,
-  authorized_at TEXT DEFAULT CURRENT_TIMESTAMP
-);
-`);
-
-const upsertToken = db.prepare(`
-INSERT INTO oauth_users (user_id, guild_id, access_token, refresh_token, expires_at)
-VALUES (?, ?, ?, ?, ?)
-ON CONFLICT(user_id) DO UPDATE SET
-  guild_id = excluded.guild_id,
-  access_token = excluded.access_token,
-  refresh_token = excluded.refresh_token,
-  expires_at = excluded.expires_at,
-  authorized_at = CURRENT_TIMESTAMP
-`);
-const getToken = db.prepare('SELECT * FROM oauth_users WHERE user_id = ?');
+const { saveTokens, getTokens, forgetTokens, authorizedGuilds, hasEncryptionKey } = require('./tokenStore');
 
 // state -> guildId (anti-CSRF; expira em 10 min)
 const pendingStates = new Map();
 const STATE_TTL_MS = 10 * 60 * 1000;
+
+// Renova antes de vencer de fato: um token que expira durante a requisição
+// devolve 401 e o usuário levaria a culpa de uma corrida de relógio.
+const REFRESH_MARGIN_MS = 60 * 1000;
 
 function createOAuthUrl(guildId) {
   const { CLIENT_ID, OAUTH_REDIRECT_URI } = process.env;
@@ -45,21 +25,56 @@ function createOAuthUrl(guildId) {
   return `https://discord.com/oauth2/authorize?${params}`;
 }
 
-async function exchangeCode(code) {
-  const { CLIENT_ID, CLIENT_SECRET, OAUTH_REDIRECT_URI } = process.env;
-  const res = await fetch('https://discord.com/api/v10/oauth2/token', {
+/** POST no endpoint de token do Discord com as credenciais da aplicação. */
+async function tokenRequest(path, params) {
+  const { CLIENT_ID, CLIENT_SECRET } = process.env;
+  const res = await fetch(`https://discord.com/api/v10/oauth2/${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: CLIENT_ID,
-      client_secret: CLIENT_SECRET,
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: OAUTH_REDIRECT_URI,
-    }),
+    body: new URLSearchParams({ client_id: CLIENT_ID, client_secret: CLIENT_SECRET, ...params }),
+  });
+  return res;
+}
+
+async function exchangeCode(code) {
+  const res = await tokenRequest('token', {
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: process.env.OAUTH_REDIRECT_URI,
   });
   if (!res.ok) throw new Error(`Token exchange falhou: ${res.status} ${await res.text()}`);
   return res.json();
+}
+
+/**
+ * Troca o refresh token por um par novo.
+ *
+ * O Discord devolve um refresh token novo a cada renovação e invalida o
+ * anterior, então o retorno precisa ser gravado inteiro — guardar só o access
+ * token deixaria o usuário sem como renovar na próxima vez.
+ *
+ * @returns {Promise<{access_token: string, refresh_token?: string, expires_in: number}|null>}
+ */
+async function refreshTokens(refreshToken) {
+  const res = await tokenRequest('token', { grant_type: 'refresh_token', refresh_token: refreshToken });
+  if (!res.ok) {
+    console.warn(`[oauth] Refresh recusado: ${res.status}`);
+    return null;
+  }
+  return res.json();
+}
+
+/**
+ * Avisa o Discord para invalidar o token. Sem isso, "desautorizar" só apagaria
+ * a nossa cópia — o token continuaria válido até vencer sozinho.
+ */
+async function revokeAtDiscord(token, hint) {
+  if (!token) return;
+  await tokenRequest('token/revoke', { token, token_type_hint: hint })
+    .then((res) => {
+      if (!res.ok) console.warn(`[oauth] Revoke recusado: ${res.status}`);
+    })
+    .catch((err) => console.warn('[oauth] Revoke falhou:', err.message));
 }
 
 async function fetchOAuthUser(accessToken) {
@@ -71,15 +86,75 @@ async function fetchOAuthUser(accessToken) {
 }
 
 /**
+ * Devolve um access token válido para o par (usuário, servidor), renovando se
+ * estiver vencido ou quase.
+ *
+ * @returns {Promise<{ok: true, accessToken: string} | {ok: false, reason: string}>}
+ */
+async function validAccessToken(userId, guildId) {
+  const stored = getTokens(userId, guildId);
+  if (!stored) {
+    return { ok: false, reason: 'Usuário nunca autorizou o bot via OAuth **neste servidor**.' };
+  }
+
+  const expiresAt = stored.expiresAt ? new Date(stored.expiresAt).getTime() : 0;
+  if (expiresAt && expiresAt - REFRESH_MARGIN_MS > Date.now()) {
+    return { ok: true, accessToken: stored.accessToken };
+  }
+
+  if (!stored.refreshToken) {
+    return { ok: false, reason: 'Autorização expirada e sem refresh token. O usuário precisa verificar novamente.' };
+  }
+
+  const renewed = await refreshTokens(stored.refreshToken).catch(() => null);
+  if (!renewed?.access_token) {
+    // Refresh recusado significa autorização revogada do lado do Discord: a
+    // cópia local só mentiria daqui para frente.
+    forgetTokens(userId, guildId);
+    return { ok: false, reason: 'Autorização não pôde ser renovada (provavelmente revogada). O usuário precisa verificar novamente.' };
+  }
+
+  saveTokens({
+    userId,
+    guildId,
+    accessToken: renewed.access_token,
+    refreshToken: renewed.refresh_token ?? stored.refreshToken,
+    expiresAt: new Date(Date.now() + renewed.expires_in * 1000).toISOString(),
+  });
+
+  return { ok: true, accessToken: renewed.access_token };
+}
+
+/**
+ * Remove a autorização de um usuário: revoga no Discord e apaga a cópia local.
+ *
+ * @param {string} userId
+ * @param {string|null} [guildId] omitido/`null` = todos os servidores
+ * @returns {Promise<{revoked: number}>}
+ */
+async function revokeAuthorization(userId, guildId) {
+  const targets = guildId ? [guildId] : authorizedGuilds(userId);
+
+  for (const target of targets) {
+    const stored = getTokens(userId, target);
+    if (!stored) continue;
+    await revokeAtDiscord(stored.refreshToken, 'refresh_token');
+    await revokeAtDiscord(stored.accessToken, 'access_token');
+  }
+
+  return { revoked: forgetTokens(userId, guildId ?? null) };
+}
+
+/**
  * Adiciona um usuário previamente autorizado a um servidor (guilds.join).
  * Requer que o bot esteja no servidor com permissão Create Invite.
+ *
+ * O token é procurado por `(userId, guildId)`: a autorização dada em um
+ * servidor não serve para arrastar a conta para outro.
  */
 async function addUserToGuild(client, userId, guildId) {
-  const row = getToken.get(userId);
-  if (!row) return { ok: false, reason: 'Usuário nunca autorizou o bot via OAuth.' };
-  if (row.expires_at && new Date(row.expires_at) < new Date()) {
-    return { ok: false, reason: 'Autorização expirada. O usuário precisa verificar novamente.' };
-  }
+  const token = await validAccessToken(userId, guildId);
+  if (!token.ok) return token;
 
   const res = await fetch(`https://discord.com/api/v10/guilds/${guildId}/members/${userId}`, {
     method: 'PUT',
@@ -87,7 +162,7 @@ async function addUserToGuild(client, userId, guildId) {
       Authorization: `Bot ${process.env.DISCORD_TOKEN}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ access_token: row.access_token }),
+    body: JSON.stringify({ access_token: token.accessToken }),
   });
 
   if (res.status === 201) return { ok: true, added: true };
@@ -129,7 +204,13 @@ function startOAuthServer(client) {
       const user = await fetchOAuthUser(token.access_token);
       const expiresAt = new Date(Date.now() + token.expires_in * 1000).toISOString();
 
-      upsertToken.run(user.id, pending.guildId, token.access_token, token.refresh_token ?? null, expiresAt);
+      saveTokens({
+        userId: user.id,
+        guildId: pending.guildId,
+        accessToken: token.access_token,
+        refreshToken: token.refresh_token ?? null,
+        expiresAt,
+      });
 
       // dá o cargo de verificado, se configurado
       const { getGuildConfig } = require('../database/db');
@@ -153,7 +234,13 @@ function startOAuthServer(client) {
   return server;
 }
 
+/**
+ * A chave de criptografia entra na conta de propósito: sem ela os tokens
+ * ficariam em texto puro no SQLite, então a feature fica desligada em vez de
+ * rodar insegura.
+ */
 const isOAuthEnabled = () =>
-  Boolean(process.env.CLIENT_SECRET && process.env.OAUTH_REDIRECT_URI && process.env.CLIENT_ID);
+  Boolean(process.env.CLIENT_SECRET && process.env.OAUTH_REDIRECT_URI && process.env.CLIENT_ID) &&
+  hasEncryptionKey();
 
-module.exports = { startOAuthServer, createOAuthUrl, addUserToGuild, isOAuthEnabled };
+module.exports = { startOAuthServer, createOAuthUrl, addUserToGuild, revokeAuthorization, isOAuthEnabled };

@@ -56,7 +56,12 @@ module.exports = {
     }
 
     // endGiveaway edita a mensagem original e anuncia os vencedores no canal do sorteio.
-    await endGiveaway(interaction.client, giveaway);
+    // Retorna false quando a varredura automática encerrou o sorteio nesse meio-tempo.
+    if (!(await endGiveaway(interaction.client, giveaway))) {
+      return respond(interaction, {
+        embeds: [errorEmbed(`O sorteio **#${giveaway.id}** acabou de ser encerrado por outro processo.`)],
+      });
+    }
 
     return respond(interaction, {
       embeds: [

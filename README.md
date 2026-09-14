@@ -86,6 +86,7 @@ São 38 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 | `/embed titulo descricao canal cor anexo midia_url miniatura miniatura_url rodape` | Cria um embed com pré-visualização antes de enviar (imagem grande + miniatura no canto) | Gerenciar mensagens |
 | `/nuke confirmar` | Recria o canal atual do zero (apaga todas as mensagens) | Gerenciar canais |
 | `/ping` | Latência do gateway, tempo de resposta e uptime | Todos |
+| `/desconectar-conta` | Revoga a autorização OAuth que você deu ao bot | Todos |
 
 ### Configuração
 
@@ -473,9 +474,17 @@ Republicar no mesmo canal **edita a mensagem já publicada** em vez de empilhar 
 
 ### Conexão de conta com OAuth (opcional)
 
-Se você preencher `CLIENT_SECRET`, `OAUTH_REDIRECT_URI` e `OAUTH_PORT` no `.env` (e cadastrar a Redirect URL na aba OAuth2 do Developer Portal), após verificar o usuário também recebe um botão opcional **Conectar conta** (escopos `identify guilds.join`, com consentimento explícito na tela oficial do Discord). Usuários conectados podem ser readicionados ao servidor pela staff com `/pull-user`.
+Se você preencher `CLIENT_SECRET`, `OAUTH_REDIRECT_URI`, `OAUTH_PORT` e `OAUTH_TOKEN_KEY` no `.env` (e cadastrar a Redirect URL na aba OAuth2 do Developer Portal), após verificar o usuário também recebe um botão opcional **Conectar conta** (escopos `identify guilds.join`, com consentimento explícito na tela oficial do Discord). Usuários conectados podem ser readicionados ao servidor pela staff com `/pull-user`, e podem sair a qualquer momento com `/desconectar-conta`.
 
 > O servidor de callback roda em `http://localhost:PORTA/callback`. Para uso real, exponha com um domínio/HTTPS (ex: reverse proxy) e atualize a Redirect URL.
+
+**Como os tokens são guardados.** Um token com `guilds.join` permite puxar a conta para dentro de um servidor, então:
+
+- Ele fica **cifrado** (AES-256-GCM) na tabela `oauth_tokens`, com a chave em `OAUTH_TOKEN_KEY` — fora do banco. Gere a sua com `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Sem essa chave o OAuth **não liga**: é melhor a feature ficar desligada do que rodar com token em texto puro no `bot.sqlite`.
+- A autorização é registrada por **`(usuário, servidor)`**. Autorizar no servidor B não apaga nem reaproveita a autorização do servidor A, e `/pull-user` só usa o token daquele servidor.
+- Tokens vencidos são **renovados** com o refresh token na hora do uso. Se o Discord recusar a renovação (autorização revogada por lá), o registro é apagado.
+- `/desconectar-conta` revoga o token no Discord e apaga a cópia local. Com `todos-servidores: true`, faz isso em todos os servidores onde a pessoa autorizou.
+- Trocar `OAUTH_TOKEN_KEY` invalida os registros guardados: eles são descartados no primeiro uso e os usuários reautorizam pelo painel.
 
 ## Placeholders de boas-vindas
 

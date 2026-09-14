@@ -57,7 +57,13 @@ module.exports = {
       });
     }
 
-    await cancelGiveaway(interaction.client, giveaway, interaction.user);
+    // Retorna false quando a varredura automática encerrou o sorteio nesse meio-tempo
+    // — nesse caso os vencedores já foram anunciados e cancelar não faz mais sentido.
+    if (!(await cancelGiveaway(interaction.client, giveaway, interaction.user))) {
+      return respond(interaction, {
+        embeds: [errorEmbed(`O sorteio **#${giveaway.id}** acabou de ser encerrado por outro processo.`)],
+      });
+    }
 
     const cancelIcon = emoji(interaction.guild, 'giveaway_cancel');
     await logEvent(

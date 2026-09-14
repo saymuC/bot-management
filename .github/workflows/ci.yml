@@ -14,6 +14,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      # --ignore-scripts: better-sqlite3 13 traz binário pré-compilado em
+      # prebuilds/ mas não declara install script, então o npm cai no
+      # `node-gyp rebuild` por padrão — compilação desnecessária que quebra em
+      # qualquer host sem toolchain C++.
+      - run: npm ci --ignore-scripts
       - run: npm test
       - run: npm run typecheck

@@ -10,8 +10,11 @@ const stmts = {
   enter: db.prepare('INSERT OR IGNORE INTO giveaway_entries (giveaway_id, user_id) VALUES (?, ?)'),
   entries: db.prepare('SELECT user_id FROM giveaway_entries WHERE giveaway_id = ?'),
   entryCount: db.prepare('SELECT COUNT(*) AS n FROM giveaway_entries WHERE giveaway_id = ?'),
-  markEnded: db.prepare('UPDATE giveaways SET ended = 1 WHERE id = ?'),
-  markCancelled: db.prepare('UPDATE giveaways SET ended = 1, cancelled = 1, cancelled_by = ? WHERE id = ?'),
+  // `AND ended = 0` é o que garante encerramento único: quem conseguir o UPDATE
+  // (changes === 1) é o dono do anúncio. Sem isso, duas varreduras sobrepostas —
+  // ou duas instâncias do bot no mesmo banco — anunciam os vencedores duas vezes.
+  markEnded: db.prepare('UPDATE giveaways SET ended = 1 WHERE id = ? AND ended = 0'),
+  markCancelled: db.prepare('UPDATE giveaways SET ended = 1, cancelled = 1, cancelled_by = ? WHERE id = ? AND ended = 0'),
   openByGuild: db.prepare(
     'SELECT * FROM giveaways WHERE guild_id = ? AND ended = 0 ORDER BY ends_at ASC LIMIT 25'
   ),
@@ -87,12 +90,16 @@ async function handleEntryButton(interaction, giveawayId) {
   });
 }
 
-/** Encerra um giveaway: sorteia, edita a mensagem e anuncia. */
+/**
+ * Encerra um giveaway: sorteia, edita a mensagem e anuncia.
+ *
+ * @returns {Promise<boolean>} `false` quando outro processo já encerrou o sorteio.
+ */
 async function endGiveaway(client, giveaway) {
-  stmts.markEnded.run(giveaway.id);
+  if (stmts.markEnded.run(giveaway.id).changes === 0) return false;
 
   const channel = await client.channels.fetch(giveaway.channel_id).catch(() => null);
-  if (!channel?.isTextBased()) return;
+  if (!channel?.isTextBased()) return true;
 
   const winners = pickWinners(giveaway.id, giveaway.winners_count);
   const winnersText = winners.length
@@ -125,18 +132,22 @@ async function endGiveaway(client, giveaway) {
         : `Sorteio de **${giveaway.prize}** encerrado sem participantes. (Sorteio #${giveaway.id})`
     )
     .catch(() => {});
+
+  return true;
 }
 
 /**
  * Cancela um sorteio: encerra sem sortear nada.
  * Nenhum vencedor é escolhido nem revelado — o registro só é marcado como
  * cancelado, então a varredura periódica também deixa de considerá-lo.
+ *
+ * @returns {Promise<boolean>} `false` quando outro processo já encerrou o sorteio.
  */
 async function cancelGiveaway(client, giveaway, cancelledBy) {
-  stmts.markCancelled.run(cancelledBy?.id ?? null, giveaway.id);
+  if (stmts.markCancelled.run(cancelledBy?.id ?? null, giveaway.id).changes === 0) return false;
 
   const channel = await client.channels.fetch(giveaway.channel_id).catch(() => null);
-  if (!channel?.isTextBased()) return;
+  if (!channel?.isTextBased()) return true;
 
   const notice = baseEmbed({
     title: `${emoji(giveaway.guild_id, 'giveaway_cancel')} Sorteio cancelado: ${giveaway.prize}`,
@@ -156,6 +167,8 @@ async function cancelGiveaway(client, giveaway, cancelledBy) {
   await channel
     .send({ embeds: [notice] })
     .catch(() => {});
+
+  return true;
 }
 
 /** Varredura periódica de giveaways vencidos — chamada no ready.js. */
