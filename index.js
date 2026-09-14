@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, Partials } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, Options } = require('discord.js');
 const { loadCommands } = require('./handlers/loadCommands');
 const { loadEvents } = require('./handlers/loadEvents');
 const { getSavedPresence, buildPresenceData, describePresence } = require('./utils/presence');
@@ -34,6 +34,30 @@ const client = new Client({
     ...(wantsPresenceIntent ? [GatewayIntentBits.GuildPresences] : []),
   ],
   partials: [Partials.Message, Partials.Reaction, Partials.Channel],
+  // A intent `GuildMembers` faz o discord.js guardar todo membro que ele vê, e nada
+  // tira esse membro do cache: em vários servidores movimentados a memória só sobe
+  // até o host matar o processo. Nada no bot depende de cache de membro quente —
+  // quem precisa de um membro faz `members.fetch(id)`, e o ranking já busca em lote
+  // os que faltam (handlers/levelsLeaderboardHandler.js) — então dá para varrer.
+  //
+  // O bot é a única exceção obrigatória: `guild.members.me` só lê o cache, e sem ele
+  // toda checagem de permissão de canal passa a devolver nulo.
+  //
+  // ponytail: varre todos os membros de meia em meia hora em vez de olhar atividade;
+  // GuildMember não tem "visto por último" (`joinedTimestamp` é data de entrada, não
+  // uso). Se o custo de refetch aparecer, trocar por um LRU em `makeCache`.
+  sweepers: {
+    ...Options.DefaultSweeperSettings,
+    members: {
+      interval: 1800,
+      filter: () => (member) => member.id !== member.client.user.id,
+    },
+    // `client.users.cache` é global e cresce igual, pelo mesmo motivo.
+    users: {
+      interval: 3600,
+      filter: () => (user) => user.id !== user.client.user.id,
+    },
+  },
 });
 
 loadCommands(client);
