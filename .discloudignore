@@ -3,4 +3,7 @@ node_modules
 .github
 test
 data
+bot.sqlite
+bot.sqlite-shm
+bot.sqlite-wal
 exemplo-transcript.html

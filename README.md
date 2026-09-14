@@ -35,6 +35,14 @@ Em qualquer host que publique por **upload** (Discloud) ou por **imagem** (Docke
 - `AUTORESTART=true` exige plano Platinum ou superior. Sem ele, uma exceção não tratada derruba o bot até você subir de novo à mão — o processo sai com código 1 de propósito, para o host reiniciar.
 - No `.env` que você envia, ponha **`DATABASE_PATH=data/bot.sqlite`**. A pasta `data` está no `.discloudignore`, então o commit seguinte não a sobrescreve.
 
+O boot diz qual arquivo foi aberto — é assim que se confere que um deploy continuou no mesmo banco, sem adivinhar:
+
+```
+[db] Banco em /home/container/data/bot.sqlite
+```
+
+Se essa linha mudar de caminho entre dois deploys, os dados não sumiram: o processo passou a escrever em outro arquivo.
+
 Os testes da lógica pura (normalização de texto, curingas, detectores, janelas de tempo, escada de pontos, fórmula de níveis, anti-farm) rodam sem Discord e sem dependência extra:
 
 ```bash
@@ -456,11 +464,9 @@ Nada depende de cache de membro quente: quem precisa de um membro faz `members.f
 
 Dá para escolher a bolinha (online, ausente, não perturbe, invisível) e o tipo de atividade: nenhuma, personalizado, jogando, assistindo, ouvindo, competindo em e **transmitindo** — este último deixa o bot roxo e o título clicável, mas o Discord exige uma URL de Twitch ou YouTube (qualquer outro domínio é ignorado, inclusive `discord.gg`).
 
-O status é aplicado de forma redundante porque o gateway o zera em cada reconexão: ele vai dentro do IDENTIFY (nasce certo em todo login) e é reconferido nos eventos de reconexão. A conferência é "olha antes de agir" — se o status já está correto, nada é enviado; se divergir, o bot corrige e confere de novo, até 3 tentativas. Não há verificação periódica em segundo plano.
+O status é aplicado de forma redundante porque o gateway o zera em cada reconexão: ele vai dentro do IDENTIFY (nasce certo em todo login) e é reaplicado nos eventos de reconexão (`shardReady`, `shardResume`). Não há verificação periódica em segundo plano.
 
-Reler o status real depende da intent privilegiada `PRESENCE INTENT` (`GuildPresences`), que o bot pede no IDENTIFY. Ligá-la no portal do Discord **não basta** — ela também tem de ser pedida pelo código, e é isso que faz a conferência funcionar em vez de o bot reaplicar às cegas a cada reconexão.
-
-> Se você não quiser ligá-la no portal, ponha `PRESENCE_INTENT=false` no `.env`: o bot deixa de pedir a intent, o status passa a ser aplicado sem conferência (o que basta, já que ele também vai no IDENTIFY) e o log diz isso uma vez. Pedir uma intent privilegiada que está desligada no portal derruba o login — nesse caso o bot agora explica exatamente o que fazer em vez de morrer num stack trace.
+> O bot **não** confere o status antes de reaplicar, e a intent `PRESENCE INTENT` (`GuildPresences`) não é usada: a presença do próprio bot não é observável. `guild.members.me.presence` vem de `guild.presences.cache`, que só muda com um `PRESENCE_UPDATE`, e o Discord não manda esse evento para a presença do próprio bot — o cache fica congelado no valor do `GUILD_CREATE`. Comparar com ele fazia o bot achar que toda mudança tinha falhado e reenviar até desistir, com o status certo no ar. Reaplicar direto é um OP 3 por evento e dispensa a intent (que, ligada, guardaria a presença de todo membro de todo servidor em cache).
 
 ## Verificação por captcha
 
