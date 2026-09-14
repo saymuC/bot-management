@@ -5,8 +5,10 @@ const db = new Database(path.join(__dirname, 'bot.sqlite'));
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 // Espera pelo lock em vez de falhar de imediato com SQLITE_BUSY. Em WAL, leitura e
-// escrita convivem, mas duas escritas não: sem isto, dois processos no mesmo arquivo
-// (a suíte de testes roda os arquivos em paralelo) derrubam um deles na hora.
+// escrita convivem, mas duas escritas não: sem isto, duas instâncias do bot no mesmo
+// arquivo derrubam uma delas na hora. Não cobre a linha acima — a troca de
+// journal_mode devolve SQLITE_BUSY sem consultar este timeout, e é por isso que a
+// suíte roda com `--test-concurrency=1`.
 db.pragma('busy_timeout = 5000');
 
 db.exec(`
