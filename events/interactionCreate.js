@@ -15,6 +15,7 @@ const { db } = require('../database/db');
 const { errorEmbed, successEmbed } = require('../utils/embeds');
 const { respond } = require('../utils/interactions');
 const { isAckFailure, logAckFailure } = require('../utils/interactionAck');
+const { logError } = require('../utils/observability');
 
 const reactionRoleStmt = db.prepare('SELECT * FROM reaction_roles WHERE id = ?');
 
@@ -32,7 +33,7 @@ async function handleRoleButton(interaction, entryId) {
     await interaction.member.roles.add(entry.role_id, 'Self-role (toggle)');
     return respond(interaction, { embeds: [successEmbed(`Cargo <@&${entry.role_id}> adicionado!`)] });
   } catch (err) {
-    console.error('[roles] Falha no toggle de cargo:', err.message);
+    logError('roles', err, { guildId: interaction.guildId, userId: interaction.user.id, roleId: entry.role_id });
     return respond(interaction, {
       embeds: [errorEmbed('Não consegui alterar seu cargo. Verifique a hierarquia de cargos do bot.')],
     });
@@ -153,7 +154,16 @@ module.exports = {
         logAckFailure('interactionCreate', interaction, err);
         return;
       }
-      console.error('[interactionCreate] Erro:', err);
+      logError('interactionCreate', err, {
+        guildId: interaction.guildId,
+        userId: interaction.user?.id,
+        command: interaction.commandName,
+        customId: interaction.customId,
+        channelId: interaction.channelId,
+        // Aponta um ack lento antes de o 10062 aparecer: se a idade já está alta
+        // aqui, o erro real é a demora, não o que a stack mostra.
+        ageMs: interaction.createdTimestamp ? Date.now() - interaction.createdTimestamp : undefined,
+      });
       // Autocomplete não tem canal de resposta de erro — só o log acima.
       if (interaction.isAutocomplete?.()) return;
       const payload = { embeds: [errorEmbed('Ocorreu um erro ao processar sua ação.')] };

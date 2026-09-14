@@ -261,7 +261,7 @@ async function enforce(message, violation, config) {
         fromLadder && rule.action !== 'none' && rule.action !== chosen.action
           ? `ação da regra (${ACTIONS[rule.action]?.label ?? rule.action}) absorvida pela escada`
           : null,
-        ...failures.map((f) => `⚠️ ${f.detail}`),
+        ...failures.map((f) => `${emoji(message.guild, 'warning')} ${f.detail}`),
       ]
         .filter(Boolean)
         .join('\n'),

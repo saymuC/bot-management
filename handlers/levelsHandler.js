@@ -16,6 +16,7 @@ const { inspectContent, rollXp } = require('../utils/levels/antiFarm');
 const tracker = require('../utils/levels/tracker');
 const { changeXp } = require('../utils/levels/service');
 const { syncMemberRewards } = require('../utils/levels/rewards');
+const { emoji } = require('../utils/emojis');
 
 /**
  * Mensagem que nunca concede XP, seja qual for a config.
@@ -70,9 +71,10 @@ async function announceLevelUp(message, config, change) {
   if (!channel) return;
 
   const jumped = change.newLevel - change.previousLevel > 1;
+  const mark = emoji(message.guild, 'level_up');
   const text = jumped
-    ? `🎉 ${message.author} avançou do nível **${change.previousLevel}** para o nível **${change.newLevel}**!`
-    : `🎉 ${message.author} alcançou o nível **${change.newLevel}**!`;
+    ? `${mark} ${message.author} avançou do nível **${change.previousLevel}** para o nível **${change.newLevel}**!`
+    : `${mark} ${message.author} alcançou o nível **${change.newLevel}**!`;
 
   await channel.send({ content: text, allowedMentions: { users: [message.author.id] } });
 }

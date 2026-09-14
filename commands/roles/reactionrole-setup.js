@@ -3,6 +3,8 @@ const {
 const { respond } = require('../../utils/interactions');
 const { db } = require('../../database/db');
 const { baseEmbed, successEmbed, errorEmbed } = require('../../utils/embeds');
+// Alias: `emoji` já é o nome da opção do comando logo abaixo.
+const { emoji: resolveEmoji } = require('../../utils/emojis');
 
 const insertRR = db.prepare(
   'INSERT INTO reaction_roles (guild_id, message_id, emoji, role_id) VALUES (?, ?, ?, ?)'
@@ -27,7 +29,7 @@ module.exports = {
     const role = interaction.options.getRole('cargo', true);
     const channel = interaction.options.getChannel('canal') ?? interaction.channel;
     const text = interaction.options.getString('mensagem') ?? `Clique no botão para receber/remover o cargo ${role.name}.`;
-    const emoji = interaction.options.getString('emoji') ?? '🎭';
+    const emoji = interaction.options.getString('emoji') ?? resolveEmoji(interaction.guild, 'reaction_role');
 
     if (role.position >= interaction.guild.members.me.roles.highest.position) {
       return respond(interaction, {
@@ -45,7 +47,12 @@ module.exports = {
     const entryId = result.lastInsertRowid;
 
     const message = await channel.send({
-      embeds: [baseEmbed({ title: '🎭 Escolha seu cargo', description: text })],
+      embeds: [
+        baseEmbed({
+          title: `${resolveEmoji(interaction.guild, 'reaction_role')} Escolha seu cargo`,
+          description: text,
+        }),
+      ],
       components: [
         new ActionRowBuilder().addComponents(
           new ButtonBuilder()

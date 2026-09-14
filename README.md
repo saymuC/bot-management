@@ -26,7 +26,7 @@ npm test
 
 ## Comandos
 
-São 38 comandos. A coluna **Permissão** é a exigência padrão do Discord para o membro ver e usar o comando (dá para sobrescrever em _Configurações do servidor → Integrações_).
+São 39 comandos. A coluna **Permissão** é a exigência padrão do Discord para o membro ver e usar o comando (dá para sobrescrever em _Configurações do servidor → Integrações_).
 
 ### Moderação
 
@@ -86,6 +86,7 @@ São 38 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 | `/embed titulo descricao canal cor anexo midia_url miniatura miniatura_url rodape` | Cria um embed com pré-visualização antes de enviar (imagem grande + miniatura no canto) | Gerenciar mensagens |
 | `/nuke confirmar` | Recria o canal atual do zero (apaga todas as mensagens) | Gerenciar canais |
 | `/ping` | Latência do gateway, tempo de resposta e uptime | Todos |
+| `/health` | Uptime, memória, latência, servidores e erros registrados | Gerenciar servidor |
 | `/desconectar-conta` | Revoga a autorização OAuth que você deu ao bot | Todos |
 
 ### Configuração
@@ -395,7 +396,7 @@ Só existe pedido de avaliação quando o ticket foi reivindicado — sem atende
 
 ## Emojis configuráveis
 
-Todo emoji que o bot mostra aos membros vive num registro central (`utils/emojis.js`) e pode ser trocado **por servidor** — 27 chaves em 6 categorias: gerais, tickets, sorteios, entrada/verificação, moderação e logs.
+Todo emoji que o bot mostra aos membros vive num registro central (`utils/emojis.js`) e pode ser trocado **por servidor** — 49 chaves em 8 categorias: gerais, tickets, sorteios, entrada/verificação, moderação, níveis, cargos e logs.
 
 `/config-emojis` abre o painel. O primeiro menu escolhe a **categoria** e o segundo lista só as chaves dela: um select do Discord aceita 25 opções e o registro já passa disso, então o limite passa a valer por categoria — o próprio módulo recusa subir se alguma categoria estourar 25 chaves. Você escolhe a chave no menu e o bot pede para **mandar o emoji novo ali no chat mesmo** — vale o teclado de emojis do Discord ou um emoji personalizado de qualquer servidor em que o bot esteja. Ele lê a mensagem, apaga e salva na hora. Na conversa também dá para escrever `padrao` para restaurar ou `cancelar` para desistir; a janela é de 60 s.
 
@@ -409,6 +410,22 @@ Só as diferenças em relação ao padrão são gravadas (JSON em `guild_config.
 - ou um anexo (`png`, `jpg`, `gif`, `webp`).
 
 O download é validado antes de ir para a API: só `https`, endereços internos bloqueados, redirecionamentos reconferidos e o limite de **256 KB** do Discord aplicado. O comando também confere as vagas de emoji do servidor (estáticas e animadas contam separado) e responde com o motivo em português quando a API recusa.
+
+Um teste (`test/emojis.hardcoded.test.js`) varre os arquivos já ligados ao registro e falha se algum emoji padrão voltar a ser escrito direto no código — é assim que a configuração por servidor não se perde numa alteração futura.
+
+## Observabilidade
+
+Erro em produção é registrado numa linha só de JSON, com contexto: servidor, usuário, comando, `customId` e a idade da interação (`utils/observability.js`). A stack vai na linha seguinte, para o JSON continuar grepável. Campos com cara de segredo (`token`, `secret`, `password`, `authorization`…) são descartados antes de logar, e `unhandledRejection`/`uncaughtException` passam pelo mesmo caminho — uma exceção não tratada é registrada antes de o processo sair com código 1.
+
+`/health` (Gerenciar servidor, resposta efêmera) mostra o retrato do processo: uptime, memória (heap e RSS), latência do gateway, servidores, membros somados e canais em cache, o total de erros por escopo e os últimos 10 registrados.
+
+O mesmo retrato sai em JSON por HTTP quando você define `HEALTH_PORT` no `.env`:
+
+```bash
+curl http://localhost:3001/health
+```
+
+Responde **200** com o gateway conectado e **503** sem ele — é o que um orquestrador (Docker, Render, uptime monitor) usa para decidir reiniciar, já que o processo pode estar vivo com o bot sem atender ninguém. `HEALTH_PORT` vazio desliga só o endpoint HTTP; o `/health` no Discord continua valendo.
 
 ## Status do bot
 

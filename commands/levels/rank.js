@@ -6,6 +6,7 @@ const { progressBar, formatXp } = require('../../utils/levels/leaderboard');
 const { getXp, rankOf, participantCount } = require('../../utils/levels/repository');
 const { getLevelsConfig } = require('../../utils/levels/config');
 const { renderRankCard } = require('../../utils/levels/card/rankCard');
+const { emoji } = require('../../utils/emojis');
 
 module.exports = {
   ephemeral: false,
@@ -35,7 +36,9 @@ module.exports = {
     const member = await interaction.guild.members.fetch(user.id).catch(() => null);
 
     const displayName = member?.displayName ?? user.username;
-    const offWarning = config.enabled ? '' : '⚠️ O sistema de níveis está desligado neste servidor.';
+    const offWarning = config.enabled
+      ? ''
+      : `${emoji(interaction.guild, 'warning')} O sistema de níveis está desligado neste servidor.`;
 
     // Caminho normal: o card desenhado. Só cai no embed abaixo quando o host não
     // tem fonte utilizável ou o desenho falha.
@@ -65,7 +68,7 @@ module.exports = {
     return respond(interaction, {
       embeds: [
         baseEmbed({
-          title: `📈 Progresso de ${displayName}`,
+          title: `${emoji(interaction.guild, 'rank')} Progresso de ${displayName}`,
           description: [
             `${progressBar(progress.percent)} **${Math.round(progress.percent * 100)}%**`,
             '',

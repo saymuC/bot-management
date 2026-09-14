@@ -20,6 +20,8 @@ const CATEGORIES = Object.freeze({
   giveaway: 'Sorteios',
   members: 'Entrada e verificação',
   moderation: 'Moderação',
+  levels: 'Níveis',
+  roles: 'Cargos',
   logs: 'Logs',
 });
 
@@ -35,17 +37,27 @@ const REGISTRY = Object.freeze({
   error: { label: 'Erro', default: '❌', category: 'general', usage: 'Mensagens de erro' },
   warning: { label: 'Aviso', default: '⚠️', category: 'general', usage: 'Alertas e avisos' },
   info: { label: 'Informação', default: 'ℹ️', category: 'general', usage: 'Mensagens informativas' },
+  timer: { label: 'Tempo', default: '⏳', category: 'general', usage: 'Esperas, prazos e itens vencidos' },
+  page_prev: { label: 'Página anterior', default: '⬅️', category: 'general', usage: 'Botão de voltar em listas paginadas' },
+  page_next: { label: 'Página seguinte', default: '➡️', category: 'general', usage: 'Botão de avançar em listas paginadas' },
 
   ticket: { label: 'Ticket', default: '🎫', category: 'tickets', usage: 'Botão e título do painel de atendimento' },
   ticket_claim: { label: 'Assumir ticket', default: '🙋', category: 'tickets', usage: 'Botão de assumir o atendimento' },
   ticket_close: { label: 'Fechar ticket', default: '🔒', category: 'tickets', usage: 'Botão de fechar o ticket' },
   ticket_rating: { label: 'Avaliar ticket', default: '⭐', category: 'tickets', usage: 'Botão de avaliar o atendimento' },
+  ticket_stats: { label: 'Relatório de tickets', default: '📊', category: 'tickets', usage: 'Título do /ticket-stats' },
 
   giveaway: { label: 'Sorteio', default: '🎉', category: 'giveaway', usage: 'Botão de participar do sorteio' },
   giveaway_winner: { label: 'Vencedor', default: '🏆', category: 'giveaway', usage: 'Anúncio dos ganhadores' },
   giveaway_cancel: { label: 'Sorteio cancelado', default: '🚫', category: 'giveaway', usage: 'Log de sorteio cancelado' },
+  giveaway_empty: { label: 'Sorteio sem participantes', default: '😢', category: 'giveaway', usage: 'Encerramento sem ninguém inscrito' },
 
   verify: { label: 'Verificação', default: '✅', category: 'members', usage: 'Botão de verificar-se' },
+  verify_panel: { label: 'Desafio de verificação', default: '🔐', category: 'members', usage: 'Título do captcha e do log de verificação' },
+  verify_code: { label: 'Inserir código', default: '⌨️', category: 'members', usage: 'Botão que abre o modal do captcha' },
+  verify_retry: { label: 'Gerar outra imagem', default: '🔄', category: 'members', usage: 'Botão de trocar a imagem do captcha' },
+  verify_blocked: { label: 'Verificação bloqueada', default: '⛔', category: 'members', usage: 'Tentativas esgotadas no captcha' },
+  verify_done: { label: 'Verificado', default: '🎉', category: 'members', usage: 'Confirmação de quem passou no captcha' },
   welcome: { label: 'Boas-vindas', default: '👋', category: 'members', usage: 'Mensagem de novo membro' },
   member_join: { label: 'Membro entrou', default: '📥', category: 'members', usage: 'Log de entrada' },
   member_leave: { label: 'Membro saiu', default: '📤', category: 'members', usage: 'Log de saída' },
@@ -59,6 +71,20 @@ const REGISTRY = Object.freeze({
   automod: { label: 'AutoMod', default: '🛡️', category: 'moderation', usage: 'Painel, logs e /infractions do AutoMod' },
   automod_delete: { label: 'AutoMod apagou', default: '🚫', category: 'moderation', usage: 'Aviso de mensagem apagada pelo AutoMod' },
   raid: { label: 'Raid', default: '🚨', category: 'moderation', usage: 'Alerta de raid e entrada suspeita' },
+  pardon: { label: 'Perdão', default: '🕊️', category: 'moderation', usage: 'Perdão de infrações no /infractions' },
+  dm_notice: { label: 'Aviso na DM', default: '📩', category: 'moderation', usage: 'Relato de DM enviada ao membro' },
+
+  level_up: { label: 'Subiu de nível', default: '🎉', category: 'levels', usage: 'Anúncio de novo nível no canal' },
+  rank: { label: 'Progresso', default: '📈', category: 'levels', usage: 'Título do /rank' },
+  leaderboard: { label: 'Ranking', default: '🏆', category: 'levels', usage: 'Título do /top' },
+  xp_add: { label: 'XP adicionado', default: '📈', category: 'levels', usage: 'Resposta e log do /add-xp' },
+  xp_remove: { label: 'XP removido', default: '📉', category: 'levels', usage: 'Resposta e log do /remove-xp' },
+  xp_set: { label: 'Nível definido', default: '📊', category: 'levels', usage: 'Resposta e log do /set-level' },
+  medal_gold: { label: '1º lugar', default: '🥇', category: 'levels', usage: 'Primeiro colocado do ranking' },
+  medal_silver: { label: '2º lugar', default: '🥈', category: 'levels', usage: 'Segundo colocado do ranking' },
+  medal_bronze: { label: '3º lugar', default: '🥉', category: 'levels', usage: 'Terceiro colocado do ranking' },
+
+  reaction_role: { label: 'Autoatribuição de cargo', default: '🎭', category: 'roles', usage: 'Painel e botão do /reactionrole-setup' },
 
   message_edit: { label: 'Mensagem editada', default: '✏️', category: 'logs', usage: 'Log de edição' },
   message_delete: { label: 'Mensagem apagada', default: '🗑️', category: 'logs', usage: 'Log de exclusão' },

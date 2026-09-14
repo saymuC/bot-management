@@ -44,20 +44,30 @@ function progressBar(percent) {
 /** Número com separador de milhar, no formato pt-BR. */
 const formatXp = (value) => Number(value ?? 0).toLocaleString('pt-BR');
 
-/** Prefixo da posição: medalha nas três primeiras, número depois. */
-const positionLabel = (position) => MEDALS[position - 1] ?? `\`#${String(position).padStart(2, ' ')}\``;
+/**
+ * Prefixo da posição: medalha nas três primeiras, número depois.
+ *
+ * As medalhas entram por parâmetro para o módulo continuar sem Discord e sem
+ * banco — quem chama passa as do `/config-emojis`, os testes usam os padrões.
+ *
+ * @param {number} position
+ * @param {readonly string[]} [medals]
+ */
+const positionLabel = (position, medals = MEDALS) =>
+  medals[position - 1] ?? `\`#${String(position).padStart(2, ' ')}\``;
 
 /**
  * Uma linha do ranking.
- * @param {{ position: number, name: string, level: number, totalXp: number }} entry
+ * @param {{ position: number, name: string, level: number, totalXp: number, medals?: readonly string[] }} entry
  */
-function formatEntryLine({ position, name, level, totalXp }) {
-  return `${positionLabel(position)} **${name}** — nível **${level}** · ${formatXp(totalXp)} XP`;
+function formatEntryLine({ position, name, level, totalXp, medals = MEDALS }) {
+  return `${positionLabel(position, medals)} **${name}** — nível **${level}** · ${formatXp(totalXp)} XP`;
 }
 
 module.exports = {
   PAGE_SIZE,
   BAR_WIDTH,
+  MEDALS,
   pageCount,
   clampPage,
   pageBounds,

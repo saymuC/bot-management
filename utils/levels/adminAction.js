@@ -15,12 +15,13 @@ const { changeXp, setUserLevel } = require('./service');
 const { getLevelsConfig } = require('./config');
 const { syncMemberRewards } = require('./rewards');
 const { formatXp } = require('./leaderboard');
+const { emoji } = require('../emojis');
 
-/** Rótulos de log por operação. */
+/** Rótulos de log por operação. O emoji sai do `/config-emojis`. */
 const LABELS = Object.freeze({
-  add: { title: '📈 XP adicionado', color: colors.success },
-  remove: { title: '📉 XP removido', color: colors.warning },
-  set: { title: '📊 Nível definido', color: colors.info },
+  add: { emojiKey: 'xp_add', text: 'XP adicionado', color: colors.success },
+  remove: { emojiKey: 'xp_remove', text: 'XP removido', color: colors.warning },
+  set: { emojiKey: 'xp_set', text: 'Nível definido', color: colors.info },
 });
 
 /**
@@ -58,6 +59,7 @@ async function applyAdminXp({ interaction, user, operation, amount }) {
   }
 
   const label = LABELS[operation] ?? LABELS.set;
+  const title = `${emoji(interaction.guild, label.emojiKey)} ${label.text}`;
   const detail =
     `**Usuário:** ${user.tag} (${user.id})\n` +
     `**Administrador:** ${interaction.user.tag}\n` +
@@ -65,7 +67,7 @@ async function applyAdminXp({ interaction, user, operation, amount }) {
     `**XP:** ${change.previousXp} → ${change.totalXp}\n` +
     `**Nível:** ${change.previousLevel} → ${change.newLevel}`;
 
-  await logEvent(interaction.guild, label.title, detail, label.color);
+  await logEvent(interaction.guild, title, detail, label.color);
 
   const moved = change.previousLevel !== change.newLevel;
   const lines = [
@@ -74,9 +76,11 @@ async function applyAdminXp({ interaction, user, operation, amount }) {
       ? `Nível **${change.previousLevel}** → **${change.newLevel}**.`
       : `Continua no nível **${change.newLevel}**.`,
   ];
-  if (problems.length) lines.push(`\n⚠️ Cargos: ${problems.join(' · ')}`);
+  if (problems.length) {
+    lines.push(`\n${emoji(interaction.guild, 'warning')} Cargos: ${problems.join(' · ')}`);
+  }
 
-  return { embeds: [successEmbed(lines.join('\n'), label.title)] };
+  return { embeds: [successEmbed(lines.join('\n'), title)] };
 }
 
 module.exports = { LABELS, applyAdminXp };

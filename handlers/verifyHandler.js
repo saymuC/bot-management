@@ -34,6 +34,8 @@ const { colors, verify: verifyConfig } = require('../config/settings');
 const { isOAuthEnabled, createOAuthUrl } = require('../oauth/server');
 const { generateCode, renderCaptcha, matchesCode } = require('../utils/captcha');
 const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
+const { emoji } = require('../utils/emojis');
+const { logError } = require('../utils/observability');
 const { putChallenge, getChallenge, deleteChallenge, registerFailure, cooldownRemaining } = require('../utils/verifyChallenges');
 const {
   BUTTON_STYLES,
@@ -53,10 +55,18 @@ const replyEphemeral = (interaction, payload) =>
   safeAck(interaction, () => interaction.reply({ ...payload, flags: MessageFlags.Ephemeral }));
 
 /** Botões abaixo da imagem do captcha. */
-const challengeComponents = () => [
+const challengeComponents = (guild) => [
   new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`${PREFIX}code`).setLabel('Inserir código').setEmoji('⌨️').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`${PREFIX}new`).setLabel('Gerar outra imagem').setEmoji('🔄').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder()
+      .setCustomId(`${PREFIX}code`)
+      .setLabel('Inserir código')
+      .setEmoji(emoji(guild, 'verify_code'))
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`${PREFIX}new`)
+      .setLabel('Gerar outra imagem')
+      .setEmoji(emoji(guild, 'verify_retry'))
+      .setStyle(ButtonStyle.Secondary)
   ),
 ];
 
@@ -66,10 +76,10 @@ const challengeComponents = () => [
  * A imagem vai como anexo referenciado por `attachment://`: o código não pode
  * aparecer em texto, senão bastaria ler a mensagem para responder.
  */
-function challengePayload(challenge, notice = '') {
+function challengePayload(guild, challenge, notice = '') {
   const description = [
     `Digite o código da imagem para liberar seu acesso. São **${verifyConfig.codeLength} caracteres**, e não diferenciamos maiúsculas de minúsculas.`,
-    `⏳ Este desafio expira <t:${Math.floor(challenge.expiresAt / 1000)}:R>.`,
+    `${emoji(guild, 'timer')} Este desafio expira <t:${Math.floor(challenge.expiresAt / 1000)}:R>.`,
     `🎯 Tentativas restantes: **${verifyConfig.maxAttempts - challenge.attempts}** de ${verifyConfig.maxAttempts}.`,
   ];
   if (notice) description.push('', notice);
@@ -78,13 +88,13 @@ function challengePayload(challenge, notice = '') {
     content: '',
     embeds: [
       baseEmbed({
-        title: '🔐 Verificação',
+        title: `${emoji(guild, 'verify_panel')} Verificação`,
         description: description.join('\n'),
         color: colors.primary,
         image: `attachment://${IMAGE_NAME}`,
       }),
     ],
-    components: challengeComponents(),
+    components: challengeComponents(guild),
     files: [new AttachmentBuilder(challenge.image, { name: IMAGE_NAME })],
   };
 }
@@ -114,7 +124,14 @@ function checkEligibility(interaction) {
     return { ok: false, embed: errorEmbed('Verificação não configurada neste servidor. Avise a staff.') };
   }
   if (interaction.member.roles.cache.has(config.verify_role_id)) {
-    return { ok: false, embed: successEmbed('Você já está verificado. Nada a fazer aqui. 🎉') };
+    return {
+      ok: false,
+      embed: successEmbed(
+        `Você já está verificado. Nada a fazer aqui. ${emoji(interaction.guild, 'verify_done')}`,
+        undefined,
+        interaction.guild
+      ),
+    };
   }
 
   const cooldown = cooldownRemaining(interaction.guild.id, interaction.user.id);
@@ -123,7 +140,7 @@ function checkEligibility(interaction) {
       ok: false,
       embed: errorEmbed(
         `Você errou o código ${verifyConfig.maxAttempts} vezes. Tente novamente em **${formatDuration(cooldown)}**.`,
-        '⏳ Aguarde'
+        `${emoji(interaction.guild, 'timer')} Aguarde`
       ),
     };
   }
@@ -153,10 +170,13 @@ async function handleStart(interaction) {
 
   const challenge = issueChallenge(interaction.guild.id, interaction.user.id);
   if (!challenge) {
-    console.error('[verify] Captcha não renderizado: nenhuma fonte disponível no host.');
+    logError('verify', 'Captcha não renderizado: nenhuma fonte disponível no host.', {
+      guildId: interaction.guild.id,
+      userId: interaction.user.id,
+    });
     return replyEphemeral(interaction, { embeds: [renderFailureEmbed()] });
   }
-  return replyEphemeral(interaction, challengePayload(challenge));
+  return replyEphemeral(interaction, challengePayload(interaction.guild, challenge));
 }
 
 /** "Gerar outra imagem": novo código, mesmo contador de tentativas. */
@@ -168,10 +188,15 @@ async function handleNew(interaction) {
 
   const challenge = issueChallenge(interaction.guild.id, interaction.user.id);
   if (!challenge) {
-    console.error('[verify] Captcha não renderizado: nenhuma fonte disponível no host.');
+    logError('verify', 'Captcha não renderizado: nenhuma fonte disponível no host.', {
+      guildId: interaction.guild.id,
+      userId: interaction.user.id,
+    });
     return closeChallenge(interaction, renderFailureEmbed());
   }
-  return interaction.editReply(challengePayload(challenge, '🔄 Imagem nova gerada.'));
+  return interaction.editReply(
+    challengePayload(interaction.guild, challenge, `${emoji(interaction.guild, 'verify_retry')} Imagem nova gerada.`)
+  );
 }
 
 /** Abre o modal da resposta. Não admite defer antes do showModal. */
@@ -204,10 +229,14 @@ async function grantAccess(interaction, roleId, attemptsUsed) {
   try {
     await interaction.member.roles.add(roleId, 'Verificação por captcha');
   } catch (err) {
-    console.error('[verify] Falha ao adicionar cargo:', err.message);
+    logError('verify', err, { guildId: interaction.guild.id, userId: interaction.user.id, roleId });
     return closeChallenge(
       interaction,
-      errorEmbed('Você acertou o código, mas não consegui te dar o cargo. Avise a staff (o cargo do bot precisa estar acima do cargo de verificado).')
+      errorEmbed(
+        'Você acertou o código, mas não consegui te dar o cargo. Avise a staff (o cargo do bot precisa estar acima do cargo de verificado).',
+        undefined,
+        interaction.guild
+      )
     );
   }
 
@@ -215,7 +244,7 @@ async function grantAccess(interaction, roleId, attemptsUsed) {
 
   await logEvent(
     interaction.guild,
-    '🔐 Verificação concluída',
+    `${emoji(interaction.guild, 'verify_panel')} Verificação concluída`,
     `${interaction.user} (\`${interaction.user.tag}\`) passou no captcha.`,
     colors.success,
     [
@@ -231,8 +260,10 @@ async function grantAccess(interaction, roleId, attemptsUsed) {
       content: '',
       embeds: [
         successEmbed(
-          'Código correto! Você foi verificado. Bem-vindo(a) ao servidor. 🎉\n\n' +
-            'Opcional: conecte sua conta no botão abaixo para poder ser readicionado automaticamente pela staff.'
+          `Código correto! Você foi verificado. Bem-vindo(a) ao servidor. ${emoji(interaction.guild, 'verify_done')}\n\n` +
+            'Opcional: conecte sua conta no botão abaixo para poder ser readicionado automaticamente pela staff.',
+          undefined,
+          interaction.guild
         ),
       ],
       components: [
@@ -244,7 +275,14 @@ async function grantAccess(interaction, roleId, attemptsUsed) {
     });
   }
 
-  return closeChallenge(interaction, successEmbed('Código correto! Você foi verificado. Bem-vindo(a) ao servidor. 🎉'));
+  return closeChallenge(
+    interaction,
+    successEmbed(
+      `Código correto! Você foi verificado. Bem-vindo(a) ao servidor. ${emoji(interaction.guild, 'verify_done')}`,
+      undefined,
+      interaction.guild
+    )
+  );
 }
 
 /** Resposta do modal: acerta e libera, erra e consome tentativa. */
@@ -271,7 +309,7 @@ async function handleAnswer(interaction) {
   if (blocked) {
     await logEvent(
       interaction.guild,
-      '⛔ Verificação bloqueada',
+      `${emoji(interaction.guild, 'verify_blocked')} Verificação bloqueada`,
       `${interaction.user} (\`${interaction.user.tag}\`) errou o captcha ${verifyConfig.maxAttempts} vezes e entrou em cooldown.`,
       colors.error,
       [{ name: 'Cooldown', value: formatDuration(verifyConfig.cooldownMs), inline: true }]
@@ -280,7 +318,7 @@ async function handleAnswer(interaction) {
       interaction,
       errorEmbed(
         `Código errado ${verifyConfig.maxAttempts} vezes. Aguarde **${formatDuration(verifyConfig.cooldownMs)}** e clique no painel novamente.`,
-        '⛔ Tentativas esgotadas'
+        `${emoji(interaction.guild, 'verify_blocked')} Tentativas esgotadas`
       )
     );
   }
@@ -288,7 +326,11 @@ async function handleAnswer(interaction) {
   const updated = getChallenge(interaction.guild.id, interaction.user.id);
   if (!updated) return closeChallenge(interaction, expiredEmbed());
   return interaction.editReply(
-    challengePayload(updated, `❌ Código incorreto. Você ainda tem **${remaining}** tentativa(s). Se a imagem estiver ilegível, gere outra.`)
+    challengePayload(
+      interaction.guild,
+      updated,
+      `${emoji(interaction.guild, 'error')} Código incorreto. Você ainda tem **${remaining}** tentativa(s). Se a imagem estiver ilegível, gere outra.`
+    )
   );
 }
 
