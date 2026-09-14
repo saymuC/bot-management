@@ -15,7 +15,6 @@
   "type": "commonjs",
   "dependencies": {
     "@napi-rs/canvas": "^1.0.9",
-    "@prisma/client": "^7.10.0",
     "better-sqlite3": "^13.0.3",
     "dayjs": "^1.11.23",
     "discord.js": "^14.27.0",
@@ -24,7 +23,6 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
-    "prisma": "^8.0.0-rc.13",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   }
