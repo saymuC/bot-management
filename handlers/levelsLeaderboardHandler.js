@@ -14,6 +14,7 @@ const { baseEmbed } = require('../utils/embeds');
 const { calculateLevelFromXp } = require('../utils/levels/formula');
 const { PAGE_SIZE, clampPage, pageCount, pageBounds, formatEntryLine, formatXp } = require('../utils/levels/leaderboard');
 const { leaderboardPage, participantCount } = require('../utils/levels/repository');
+const { emoji } = require('../utils/emojis');
 const { getLevelsConfig } = require('../utils/levels/config');
 const { renderLeaderboardCard } = require('../utils/levels/card/leaderboardCard');
 
@@ -70,18 +71,19 @@ async function resolveEntries(guild, userIds) {
  *
  * @param {number} page
  * @param {number} pages
+ * @param {import('discord.js').Guild|string|null} [guild] para os emojis do servidor
  */
-function pageComponents(page, pages) {
+function pageComponents(page, pages, guild = null) {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`${PREFIX}${page - 1}`)
-        .setEmoji('⬅️')
+        .setEmoji(emoji(guild, 'page_prev'))
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(pages <= 1 || page <= 1),
       new ButtonBuilder()
         .setCustomId(`${PREFIX}${page + 1}`)
-        .setEmoji('➡️')
+        .setEmoji(emoji(guild, 'page_next'))
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(pages <= 1 || page >= pages)
     ),
@@ -94,29 +96,31 @@ function pageComponents(page, pages) {
  * É a montagem que o `/top` usava antes do card, preservada inteira: host sem
  * fonte continua tendo um ranking utilizável.
  *
- * @param {{ guildName: string, page: number, pages: number, total: number, entries: Array<{ position: number, name: string, totalXp: number }> }} data
+ * @param {{ guildName: string, page: number, pages: number, total: number, entries: Array<{ position: number, name: string, totalXp: number }>, guild?: import('discord.js').Guild|string|null }} data
  */
-function buildTopEmbedPayload({ guildName, page, pages, total, entries }) {
+function buildTopEmbedPayload({ guildName, page, pages, total, entries, guild = null }) {
+  const medals = [emoji(guild, 'medal_gold'), emoji(guild, 'medal_silver'), emoji(guild, 'medal_bronze')];
   const lines = entries.map((entry) =>
     formatEntryLine({
       position: entry.position,
       name: entry.name,
       level: calculateLevelFromXp(entry.totalXp),
       totalXp: entry.totalXp,
+      medals,
     })
   );
 
   return {
     embeds: [
       baseEmbed({
-        title: `🏆 Ranking de ${guildName}`,
+        title: `${emoji(guild, 'leaderboard')} Ranking de ${guildName}`,
         description: lines.length
           ? lines.join('\n')
           : 'Ninguém pontuou ainda. Assim que o sistema de níveis estiver ligado e alguém conversar, o ranking aparece aqui.',
         footer: `Página ${page}/${pages} · ${formatXp(total)} participante(s) · ${PAGE_SIZE} por página`,
       }),
     ],
-    components: pageComponents(page, pages),
+    components: pageComponents(page, pages, guild),
   };
 }
 
@@ -170,7 +174,11 @@ async function buildTopPayload(guild, requestedPage) {
   });
 
   if (!image) {
-    return { ...buildTopEmbedPayload({ guildName: guild.name, page, pages, total, entries }), files: [], attachments: [] };
+    return {
+      ...buildTopEmbedPayload({ guildName: guild.name, page, pages, total, entries, guild }),
+      files: [],
+      attachments: [],
+    };
   }
 
   return {
@@ -178,7 +186,7 @@ async function buildTopPayload(guild, requestedPage) {
     embeds: [],
     attachments: [],
     files: [new AttachmentBuilder(image, { name: `ranking-p${page}.png` })],
-    components: pageComponents(page, pages),
+    components: pageComponents(page, pages, guild),
   };
 }
 

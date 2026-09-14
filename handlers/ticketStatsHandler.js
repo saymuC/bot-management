@@ -60,12 +60,12 @@ function formatAgentLine(row, position, star) {
   ].join('\n');
 }
 
-function buildPaginationRow(page, totalPages) {
+function buildPaginationRow(page, totalPages, guildId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`tstats_${page - 1}`)
       .setLabel('Anterior')
-      .setEmoji('◀')
+      .setEmoji(emoji(guildId, 'page_prev'))
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(page === 0),
     new ButtonBuilder()
@@ -76,7 +76,7 @@ function buildPaginationRow(page, totalPages) {
     new ButtonBuilder()
       .setCustomId(`tstats_${page + 1}`)
       .setLabel('Próxima')
-      .setEmoji('▶')
+      .setEmoji(emoji(guildId, 'page_next'))
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(page >= totalPages - 1)
   );
@@ -91,7 +91,12 @@ function buildStatsPage(guildId, requestedPage = 0) {
 
   if (!rows.length) {
     return {
-      embeds: [infoEmbed('Nenhum atendente registrado ainda. Os dados aparecem depois que os tickets forem reivindicados ou fechados.', '📊 Desempenho dos atendentes')],
+      embeds: [
+        infoEmbed(
+          'Nenhum atendente registrado ainda. Os dados aparecem depois que os tickets forem reivindicados ou fechados.',
+          `${emoji(guildId, 'ticket_stats')} Desempenho dos atendentes`
+        ),
+      ],
       components: [],
     };
   }
@@ -106,7 +111,7 @@ function buildStatsPage(guildId, requestedPage = 0) {
     summary.avg_handle_seconds == null ? '—' : formatDuration(summary.avg_handle_seconds * 1000);
 
   const embed = baseEmbed({
-    title: '📊 Desempenho dos atendentes',
+    title: `${emoji(guildId, 'ticket_stats')} Desempenho dos atendentes`,
     description: slice
       .map((row, index) => formatAgentLine(row, page * PAGE_SIZE + index + 1, star))
       .join('\n\n'),
@@ -121,7 +126,7 @@ function buildStatsPage(guildId, requestedPage = 0) {
 
   return {
     embeds: [embed],
-    components: totalPages > 1 ? [buildPaginationRow(page, totalPages)] : [],
+    components: totalPages > 1 ? [buildPaginationRow(page, totalPages, guildId)] : [],
   };
 }
 

@@ -104,7 +104,7 @@ async function endGiveaway(client, giveaway) {
   const winners = pickWinners(giveaway.id, giveaway.winners_count);
   const winnersText = winners.length
     ? winners.map((id) => `<@${id}>`).join(', ')
-    : 'Ninguém participou 😢';
+    : `Ninguém participou ${emoji(giveaway.guild_id, 'giveaway_empty')}`;
 
   if (giveaway.message_id) {
     const message = await channel.messages.fetch(giveaway.message_id).catch(() => null);

@@ -56,7 +56,23 @@ if (isOAuthEnabled()) {
   console.log('[oauth] Desativado (defina CLIENT_SECRET e OAUTH_REDIRECT_URI no .env para habilitar).');
 }
 
-process.on('unhandledRejection', (err) => console.error('[unhandledRejection]', err));
+const { startHealthServer } = require('./utils/healthServer');
+if (!startHealthServer(client)) {
+  console.log('[health] Endpoint HTTP desligado (defina HEALTH_PORT no .env). O comando /health continua valendo.');
+}
+
+const { logError } = require('./utils/observability');
+
+process.on('unhandledRejection', (err) => logError('unhandledRejection', err));
+
+// Sem este handler o Node imprime a stack e mata o processo sem passar pelo
+// contador do /health — o reinício apagaria a única pista do que derrubou o bot.
+// Ele **não** tenta seguir em frente: depois de uma exceção não tratada o estado
+// do processo é desconhecido, então logar e sair é o que resta.
+process.on('uncaughtException', (err) => {
+  logError('uncaughtException', err, { fatal: true });
+  process.exit(1);
+});
 
 // Sem o catch, uma intent privilegiada desligada no portal só aparece como
 // "unhandledRejection" — o motivo real fica escondido no meio do stack.

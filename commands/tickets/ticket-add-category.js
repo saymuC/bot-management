@@ -2,6 +2,8 @@ const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('disco
 const { respond } = require('../../utils/interactions');
 const { db } = require('../../database/db');
 const { successEmbed, errorEmbed } = require('../../utils/embeds');
+// Alias: `emoji` já é o nome da opção do comando.
+const { emoji: resolveEmoji } = require('../../utils/emojis');
 
 const insertCategory = db.prepare(
   'INSERT INTO ticket_categories (guild_id, label, emoji, target_category_id, support_role_id) VALUES (?, ?, ?, ?, ?)'
@@ -40,7 +42,7 @@ module.exports = {
       embeds: [
         successEmbed(
           [
-            `Categoria **${emoji ?? '🎫'} ${label}** criada.`,
+            `Categoria **${emoji ?? resolveEmoji(interaction.guild, 'ticket')} ${label}** criada.`,
             category ? `Canais serão criados em: **${category.name}**` : 'Canais usarão a categoria padrão do servidor.',
             role ? `Cargo de suporte: ${role}` : 'Sem cargo de suporte definido.',
           ].join('\n')

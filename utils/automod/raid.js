@@ -153,7 +153,9 @@ async function inspectJoin(member, config) {
         { name: 'Motivo', value: hit.detail, inline: false },
         {
           name: 'Ação',
-          value: applied.ok ? applied.detail || 'nenhuma' : `⚠️ ${applied.detail}`,
+          value: applied.ok
+            ? applied.detail || 'nenhuma'
+            : `${emoji(member.guild, 'warning')} ${applied.detail}`,
           inline: false,
         },
       ]

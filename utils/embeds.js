@@ -1,5 +1,6 @@
 const { EmbedBuilder } = require('discord.js');
 const { colors } = require('../config/settings');
+const { emoji } = require('./emojis');
 
 function baseEmbed({ title, description, color = colors.primary, footer, thumbnail, image, fields } = {}) {
   const embed = new EmbedBuilder().setColor(color).setTimestamp();
@@ -21,11 +22,21 @@ function parseHexColor(raw) {
   return match ? parseInt(match[1], 16) : null;
 }
 
-const successEmbed = (description, title = '✅ Sucesso') =>
-  baseEmbed({ title, description, color: colors.success });
+/**
+ * `guild` é opcional só por compatibilidade: sem ela o título usa o emoji padrão.
+ * Passe-a nas mensagens que os membros veem — é o que faz o `/config-emojis`
+ * valer também para o "✅ Sucesso" e o "❌ Erro".
+ *
+ * @param {string} description
+ * @param {string} [title] título completo, já com o emoji que você quiser
+ * @param {import('discord.js').Guild|string|null} [guild]
+ */
+const successEmbed = (description, title, guild = null) =>
+  baseEmbed({ title: title ?? `${emoji(guild, 'success')} Sucesso`, description, color: colors.success });
 
-const errorEmbed = (description, title = '❌ Erro') =>
-  baseEmbed({ title, description, color: colors.error });
+/** @see successEmbed */
+const errorEmbed = (description, title, guild = null) =>
+  baseEmbed({ title: title ?? `${emoji(guild, 'error')} Erro`, description, color: colors.error });
 
 const infoEmbed = (description, title) =>
   baseEmbed({ title, description, color: colors.info });
