@@ -15,13 +15,6 @@ if (!process.env.DISCORD_TOKEN) {
 const savedPresence = getSavedPresence();
 console.log(`[presence] Conectando com: ${describePresence(savedPresence)}`);
 
-// Ligar `PRESENCE INTENT` no portal não basta: a intent também precisa ser pedida
-// aqui, senão o Discord não manda presença nenhuma e o bot não consegue reler o
-// próprio status — é o que fazia o guardião reaplicar às cegas a cada reconexão.
-// Pedir uma intent privilegiada que esteja desligada no portal derruba o login,
-// então dá para desligar por aqui sem editar código.
-const wantsPresenceIntent = process.env.PRESENCE_INTENT !== 'false';
-
 const client = new Client({
   presence: buildPresenceData(savedPresence),
   intents: [
@@ -31,7 +24,9 @@ const client = new Client({
     GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.GuildModeration,
     GatewayIntentBits.MessageContent,
-    ...(wantsPresenceIntent ? [GatewayIntentBits.GuildPresences] : []),
+    // `GuildPresences` não entra: nada aqui lê presença de ninguém, e a intent
+    // faria o discord.js guardar a presença de todo membro de todo servidor num
+    // cache que nem os sweepers abaixo alcançam.
   ],
   partials: [Partials.Message, Partials.Reaction, Partials.Channel],
   // A intent `GuildMembers` faz o discord.js guardar todo membro que ele vê, e nada
@@ -62,6 +57,12 @@ const client = new Client({
 
 loadCommands(client);
 loadEvents(client);
+
+// Qual arquivo de banco o processo abriu, dito no boot: em host que publica por
+// upload é a única forma de saber, sem adivinhar, se o deploy continuou lendo o
+// banco de produção ou se passou a escrever num arquivo novo (dados "sumidos").
+const { databaseFile } = require('./database/db');
+console.log(`[db] Banco em ${databaseFile}`);
 
 // O captcha da verificação depende de uma fonte do sistema. Avisar no boot evita
 // descobrir isso só quando alguém tenta se verificar.
@@ -103,9 +104,8 @@ process.on('uncaughtException', (err) => {
 client.login(process.env.DISCORD_TOKEN).catch((err) => {
   if (/disallowed intents/i.test(err?.message ?? '')) {
     console.error(
-      '[login] O Discord recusou uma intent privilegiada. Ligue `SERVER MEMBERS`, `MESSAGE CONTENT` e ' +
-        '`PRESENCE INTENT` em https://discord.com/developers/applications → sua aplicação → Bot → ' +
-        'Privileged Gateway Intents. Se preferir não usar a de presença, ponha `PRESENCE_INTENT=false` no .env.'
+      '[login] O Discord recusou uma intent privilegiada. Ligue `SERVER MEMBERS` e `MESSAGE CONTENT` em ' +
+        'https://discord.com/developers/applications → sua aplicação → Bot → Privileged Gateway Intents.'
     );
     process.exit(1);
   }

@@ -235,4 +235,4 @@ function getBotSetting(key) {
   return getBotSettingStmt.get(key)?.value ?? null;
 }
 
-module.exports = { db, setGuildConfig, getGuildConfig, setBotSetting, getBotSetting };
+module.exports = { db, databaseFile: file, setGuildConfig, getGuildConfig, setBotSetting, getBotSetting };
