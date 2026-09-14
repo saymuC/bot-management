@@ -18,6 +18,23 @@ npm start
 
 Convide o bot com o scope `bot applications.commands` e permissão de Administrador (ou as permissões mínimas: Manage Channels, Manage Roles, Ban/Kick/Moderate Members, Manage Messages, Create Invite).
 
+### Hospedagem
+
+O banco é um arquivo único. Onde ele fica é a única coisa que muda de host para host:
+
+| Variável | Vazio | Preenchido |
+| --- | --- | --- |
+| `DATABASE_PATH` | `database/bot.sqlite` | o caminho indicado (a pasta é criada se faltar) |
+
+Em qualquer host que publique por **upload** (Discloud) ou por **imagem** (Docker, Render), a pasta do código é substituída no deploy. Se o banco morar nela, todo servidor volta ao zero — níveis, tickets, avisos, configurações. Aponte `DATABASE_PATH` para fora do envio (Discloud) ou para um volume persistente (Docker).
+
+**Discloud.** `discloud.config` e `.discloudignore` já estão no repositório:
+
+- `APT=canvas` instala `fonts-liberation` e o Cairo/Pango — sem isso o captcha e os cards do `/rank` saem em branco (o boot avisa: `[verify] Captcha indisponível`).
+- `RAM=512` é folga para `@napi-rs/canvas`; os 100 MB do padrão não desenham imagem.
+- `AUTORESTART=true` exige plano Platinum ou superior. Sem ele, uma exceção não tratada derruba o bot até você subir de novo à mão — o processo sai com código 1 de propósito, para o host reiniciar.
+- No `.env` que você envia, ponha **`DATABASE_PATH=data/bot.sqlite`**. A pasta `data` está no `.discloudignore`, então o commit seguinte não a sobrescreve.
+
 Os testes da lógica pura (normalização de texto, curingas, detectores, janelas de tempo, escada de pontos, fórmula de níveis, anti-farm) rodam sem Discord e sem dependência extra:
 
 ```bash
@@ -426,6 +443,12 @@ curl http://localhost:3001/health
 ```
 
 Responde **200** com o gateway conectado e **503** sem ele — é o que um orquestrador (Docker, Render, uptime monitor) usa para decidir reiniciar, já que o processo pode estar vivo com o bot sem atender ninguém. `HEALTH_PORT` vazio desliga só o endpoint HTTP; o `/health` no Discord continua valendo.
+
+### Memória em vários servidores
+
+A intent `SERVER MEMBERS` faz o discord.js guardar todo membro que ele vê, e nada o remove: com muitos servidores movimentados, a memória sobe até o host matar o processo. Por isso o `index.js` configura `sweepers` — o cache de membros é varrido a cada 30 min e o de usuários a cada 1 h, poupando sempre o próprio bot (`guild.members.me` só lê o cache; sem ele toda checagem de permissão de canal falha).
+
+Nada depende de cache de membro quente: quem precisa de um membro faz `members.fetch(id)`, e o `/top` busca em lote só os que faltam. O cache de mensagens já é limitado pelo padrão do discord.js (200 por canal) e **não** é varrido por tempo de propósito: é dele que sai o conteúdo de uma mensagem apagada no log.
 
 ## Status do bot
 

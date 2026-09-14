@@ -1,7 +1,29 @@
 const path = require('node:path');
+const fs = require('node:fs');
 const Database = require('better-sqlite3');
 
-const db = new Database(path.join(__dirname, 'bot.sqlite'));
+/**
+ * Onde fica o arquivo do banco.
+ *
+ * O padrão (`database/bot.sqlite`) serve para desenvolvimento. Em host que publica
+ * por upload — Discloud, por exemplo — a pasta do código é sobrescrita a cada
+ * commit, e um banco que mora junto do código vai junto: níveis, tickets e
+ * configurações de todos os servidores voltam ao zero. `DATABASE_PATH` aponta o
+ * arquivo para uma pasta fora do envio (e que o `.discloudignore` preserva).
+ *
+ * Caminho relativo é resolvido a partir de onde o processo foi iniciado, que é a
+ * raiz do projeto em `npm start` — assim `DATABASE_PATH=data/bot.sqlite` funciona
+ * sem ninguém precisar descobrir o caminho absoluto do container.
+ */
+const file = process.env.DATABASE_PATH
+  ? path.resolve(process.env.DATABASE_PATH)
+  : path.join(__dirname, 'bot.sqlite');
+
+// A pasta pode não existir no primeiro boot do host novo; sem isto o
+// better-sqlite3 falha com SQLITE_CANTOPEN, que não diz o que está errado.
+fs.mkdirSync(path.dirname(file), { recursive: true });
+
+const db = new Database(file);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 // Espera pelo lock em vez de falhar de imediato com SQLITE_BUSY. Em WAL, leitura e
