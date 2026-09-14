@@ -75,6 +75,8 @@ function isPrivateIp(ip) {
   if (!Number.isFinite(first)) return true;
   if ((first >> 8) === 0xfc || (first >> 8) === 0xfd) return true; // fc00::/7 (uso local)
   if ((first & 0xffc0) === 0xfe80) return true; // fe80::/10 (link-local)
+  if ((first & 0xffc0) === 0xfec0) return true; // fec0::/10 (site-local, obsoleto mas ainda roteado)
+  if ((first & 0xff00) === 0xff00) return true; // ff00::/8 (multicast)
 
   return false;
 }

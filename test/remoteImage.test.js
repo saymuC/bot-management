@@ -26,6 +26,9 @@ test('isPrivateIp barra loopback, rede local, link-local e CGNAT', () => {
     '::',
     'fd00::1',
     'fe80::1234',
+    'fec0::1', // site-local legado
+    'ff02::1', // multicast (all-nodes)
+    'ff05::1:3',
     '64:ff9b::7f00:1',
     '::ffff:127.0.0.1', // IPv4 disfarçado de IPv6
   ]) {
