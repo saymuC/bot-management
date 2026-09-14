@@ -3,21 +3,35 @@ name: CI
 on:
   push:
     branches: [main]
+
   pull_request:
+    branches: [main]
+
+# O job só lê o repositório. Sem isto o token herda o default do repositório,
+# que pode ser read-write.
+permissions:
+  contents: read
+
+# Push seguido de push não precisa de dois jobs: o antigo já não interessa.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Com o check obrigatório no ruleset, um job pendurado deixa o PR
+    # inmergeável até o limite de 6h do runner. Falha rápido em vez disso.
+    timeout-minutes: 10
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      # --ignore-scripts: better-sqlite3 13 traz binário pré-compilado em
-      # prebuilds/ mas não declara install script, então o npm cai no
-      # `node-gyp rebuild` por padrão — compilação desnecessária que quebra em
-      # qualquer host sem toolchain C++.
+
       - run: npm ci --ignore-scripts
       - run: npm test
       - run: npm run typecheck
