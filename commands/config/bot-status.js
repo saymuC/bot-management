@@ -11,6 +11,7 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .setDMPermission(false),
 
+  /** Abre o painel de status para um administrador autorizado. */
   async execute(interaction) {
     if (!isAllowed(interaction)) {
       return respond(interaction, { embeds: [errorEmbed('Você não tem permissão para alterar o status do bot.')] });

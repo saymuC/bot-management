@@ -76,6 +76,7 @@ function isDirty(draft, applied) {
   return JSON.stringify(draft) !== JSON.stringify(applied);
 }
 
+/** Monta o resumo visual da presença aplicada e do rascunho atual. */
 function panelEmbed(draft, applied) {
   const dirty = isDirty(draft, applied);
   const meta = ACTIVITIES[draft.activity];
@@ -195,10 +196,12 @@ function buildStatusPanel(client, userId, notice = '') {
 /** Acka tolerando token morto/duplicado (mesma razão do embedHandler). */
 const safeAck = makeSafeAck('bot-status');
 
+/** Atualiza o painel preservando uma mensagem de feedback opcional. */
 function redraw(interaction, notice) {
   return safeAck(interaction, () => interaction.update(buildStatusPanel(interaction.client, interaction.user.id, notice)));
 }
 
+/** Exibe o modal que edita o nome e a linha extra da atividade. */
 function handleTextsModal(interaction, draft) {
   const modal = new ModalBuilder().setCustomId(`${PREFIX}modal-texts`).setTitle('Textos da atividade');
 

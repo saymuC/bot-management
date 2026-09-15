@@ -38,6 +38,7 @@ let desiredRaw = null;
 let lastApplied = null;
 let started = false;
 
+/** Resolve e reaplica a presença desejada quando necessário. */
 function reassert(client, reason) {
   if (!desiredRaw || !client.user) return;
   try {
