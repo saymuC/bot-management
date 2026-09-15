@@ -36,7 +36,7 @@ test('entrada vazia devolve os defaults', () => {
   assert.equal(config.panel.buttonLabel, DEFAULTS.panelButtonLabel);
   assert.deepEqual(config.permissions.staffRoleIds, []);
   assert.equal(config.permissions.allowUserSoftClose, true);
-  assert.equal(config.behavior.deleteChannelAfterFinalClose, true);
+  assert.equal(config.behavior.allowReopen, true);
   assert.equal(config.behavior.createTranscript, true);
   assert.equal(config.behavior.sendRatingDm, true);
   assert.equal(config.behavior.deleteDelaySeconds, DEFAULTS.deleteDelaySeconds);

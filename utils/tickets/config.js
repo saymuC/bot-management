@@ -34,7 +34,8 @@ const DEFAULTS = Object.freeze({
   allowUserSoftClose: true,
   requireClaimBeforeFinalClose: false,
   pingSupportRole: true,
-  deleteChannelAfterFinalClose: true,
+  // Sem "apagar o canal?": o encerramento definitivo sempre apaga, e o
+  // transcript no log é a cópia que fica. O ajuste é só o atraso.
   deleteDelaySeconds: 5,
   sendRatingDm: true,
   createTranscript: true,
@@ -105,10 +106,6 @@ function normalizeTicketConfig(raw) {
     },
     behavior: {
       pingSupportRole: normalizeBool(behavior.pingSupportRole, DEFAULTS.pingSupportRole),
-      deleteChannelAfterFinalClose: normalizeBool(
-        behavior.deleteChannelAfterFinalClose,
-        DEFAULTS.deleteChannelAfterFinalClose
-      ),
       deleteDelaySeconds: clampInt(
         behavior.deleteDelaySeconds,
         LIMITS.deleteDelaySeconds,
