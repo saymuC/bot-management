@@ -73,6 +73,15 @@ test('emoji personalizado que saiu do servidor volta ao padrão', () => {
   assert.notEqual(resolveButtonEmoji(ausente, config), '<:sumiu:900000000000000001>');
 });
 
+test('imagem entra no embed e link inválido é descartado na normalização', () => {
+  const comGif = panelOf({ panel: { imageUrl: 'https://exemplo.com/banner.gif' } });
+  assert.equal(comGif.embeds[0].data.image.url, 'https://exemplo.com/banner.gif');
+
+  // Sem http(s) o embed recusaria a mensagem inteira, então nem chega ao painel.
+  const invalida = panelOf({ panel: { imageUrl: 'banner.gif' } });
+  assert.equal(invalida.embeds[0].data.image, undefined);
+});
+
 test('emoji unicode configurado é mantido', () => {
   const config = normalizeTicketConfig({ panel: { buttonEmoji: '🎟️' } });
   assert.equal(resolveButtonEmoji(fakeGuild(), config), '🎟️');

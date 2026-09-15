@@ -19,7 +19,7 @@
  *   toggle            liga/desliga o sistema
  *   pchannel          canal do painel público
  *   pcolor            cor do embed (paleta + hex livre)
- *   ptexts            modal: título, descrição, rótulo e emoji do botão
+ *   ptexts            modal: título, descrição, rótulo/emoji do botão e imagem
  *   publish           publica ou atualiza o painel público
  *   catopen           select das categorias → abre a tela da categoria
  *   cat:<id>[:ask]    tela de uma categoria (`ask` = confirmando remoção)
@@ -51,6 +51,7 @@ const { errorEmbed, successEmbed } = require('../utils/embeds');
 const { resolveColor, describeColor } = require('../utils/colors');
 const { parseEmojiInput } = require('../utils/emojis');
 const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
+const { classifyUrl } = require('../utils/media');
 const { POST_EMBED_PERMS_LABEL, canPostEmbed } = require('../utils/channelPerms');
 const { LIMITS, DEFAULTS, getTicketConfig, saveTicketConfig } = require('../utils/tickets/config');
 const { buildTicketPanel } = require('../utils/tickets/panel');
@@ -128,12 +129,21 @@ function openPanelTextsModal(interaction, config) {
         .setValue(panel.buttonLabel),
       new TextInputBuilder()
         .setCustomId('emoji')
-        .setLabel('Emoji do botão (vazio usa o do /config-emojis)')
+        // Máximo de 45 caracteres por label; passar disso é recusado pelo Discord.
+        .setLabel('Emoji do botão (vazio usa o padrão)')
         .setPlaceholder('🎫 ou <:nome:123456789012345678>')
         .setStyle(TextInputStyle.Short)
         .setMaxLength(64)
         .setRequired(false)
         .setValue(panel.buttonEmoji ?? ''),
+      new TextInputBuilder()
+        .setCustomId('image')
+        .setLabel('Imagem ou GIF (link)')
+        .setPlaceholder('https://exemplo.com/banner.gif')
+        .setStyle(TextInputStyle.Short)
+        .setMaxLength(1024)
+        .setRequired(false)
+        .setValue(panel.imageUrl ?? ''),
     ].map(rowOf)
   );
 
@@ -233,6 +243,19 @@ function submitPanelTexts(interaction, config) {
     }
   }
 
+  const imageRaw = field(interaction, 'image');
+  let imageUrl = null;
+  if (imageRaw) {
+    const media = classifyUrl(imageRaw);
+    if (media?.kind === 'image') {
+      imageUrl = media.url;
+    } else {
+      // Vídeo ou link de plataforma não renderiza dentro do embed; mantém o anterior.
+      imageUrl = config.panel.imageUrl;
+      notices.push(media ? 'imagem mantida — vídeos e links de plataforma não aparecem no embed' : 'imagem mantida — link inválido');
+    }
+  }
+
   return applySection(
     interaction,
     config,
@@ -243,6 +266,7 @@ function submitPanelTexts(interaction, config) {
       // Vazio volta ao padrão: um botão sem rótulo é recusado pelo Discord.
       buttonLabel: field(interaction, 'label') || DEFAULTS.panelButtonLabel,
       buttonEmoji,
+      imageUrl,
     },
     `✏️ Painel atualizado${notices.length ? ` (${notices.join(' · ')})` : ''}. Clique em **Publicar / atualizar** para aplicar no canal.`,
     'panel'
