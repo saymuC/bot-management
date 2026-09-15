@@ -24,4 +24,11 @@ test('reaplica a presença no boot e em cada reconexão', () => {
 
   client.emit(Events.ShardResume);
   assert.deepEqual(sent.at(-1), sent.at(-2), 'a reconexão reaplica o último status pedido');
+
+  // O refresh periódico não pode segurar o event loop: sem `unref()` a suíte
+  // trava no CI até o timeout do job.
+  assert.ok(
+    !process.getActiveResourcesInfo().includes('Timeout'),
+    'o timer de refresh precisa estar unref()',
+  );
 });

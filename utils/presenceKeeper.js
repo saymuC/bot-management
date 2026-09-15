@@ -19,21 +19,36 @@
  */
 
 const { Events } = require('discord.js');
-const { getSavedPresence, applyPresence, describePresence } = require('./presence');
+const {
+  getSavedPresence,
+  applyPresence,
+  describePresence,
+  resolvePresenceTemplates,
+  normalizePresence,
+} = require('./presence');
 
 /**
- * Presença que o bot deve exibir. Fonte da verdade em memória: o `/bot-status`
- * atualiza aqui e toda reconexão reaplica isto.
+ * Presença (bruta) que o bot deve exibir — pode conter placeholders.
+ * Fonte da verdade em memória: o `/bot-status` atualiza aqui e toda reconexão
+ * reaplica isto.
  * @type {ReturnType<typeof getSavedPresence>|null}
  */
-let desired = null;
+let desiredRaw = null;
+/** Última presença resolvida (placeholders substituídos) aplicada de fato. */
+let lastApplied = null;
 let started = false;
 
 function reassert(client, reason) {
-  if (!desired || !client.user) return;
+  if (!desiredRaw || !client.user) return;
   try {
-    applyPresence(client, desired);
-    console.log(`[presence] (${reason}) ${describePresence(desired)}`);
+    // Resolve placeholders dinamicamente antes de aplicar
+    const resolved = resolvePresenceTemplates(client, desiredRaw);
+    // Evita enviar OP 3 se nada mudou APENAS no refresh periódico; em
+    // reconexões forçamos reaplicar para garantir a presença no Discord.
+    if (reason === 'refresh timer' && JSON.stringify(resolved) === JSON.stringify(lastApplied)) return;
+    applyPresence(client, resolved);
+    lastApplied = resolved;
+    console.log(`[presence] (${reason}) ${describePresence(resolved)}`);
   } catch (err) {
     console.error(`[presence] Falha ao aplicar (${reason}):`, err.message);
   }
@@ -41,13 +56,14 @@ function reassert(client, reason) {
 
 /** Troca a presença mantida pelo guardião e aplica na hora. */
 function setDesiredPresence(client, presence) {
-  const applied = applyPresence(client, presence);
-  // Sem sessão nada foi enviado — manter o desejado antigo evita reafirmar um
-  // valor que o usuário nem viu aplicado.
-  if (!applied) return null;
-
-  desired = applied;
-  return applied;
+  // Guardamos o valor bruto (com placeholders) para permitir resolução dinâmica.
+  desiredRaw = normalizePresence(presence);
+  if (!client.user) return null;
+  // Aplica já resolvendo para feedback imediato
+  const resolved = resolvePresenceTemplates(client, desiredRaw);
+  applyPresence(client, resolved);
+  lastApplied = resolved;
+  return resolved;
 }
 
 /**
@@ -55,7 +71,7 @@ function setDesiredPresence(client, presence) {
  * @param {import('discord.js').Client} client
  */
 function startPresenceKeeper(client) {
-  desired = getSavedPresence();
+  desiredRaw = getSavedPresence();
   reassert(client, 'boot');
 
   if (started) return;
@@ -63,6 +79,20 @@ function startPresenceKeeper(client) {
 
   client.on(Events.ShardReady, () => reassert(client, 'shard reconectado'));
   client.on(Events.ShardResume, () => reassert(client, 'shard retomado'));
+
+  // Refresh periódico para manter variáveis ({guilds}, {users}, {cluster}) atualizadas
+  const msFromEnv = Number(process.env.PRESENCE_REFRESH_INTERVAL_MS);
+  const minFromEnv = Number(process.env.PRESENCE_REFRESH_MINUTES);
+  const intervalMs = Number.isFinite(msFromEnv)
+    ? Math.max(60_000, msFromEnv)
+    : Number.isFinite(minFromEnv)
+    ? Math.max(1, minFromEnv) * 60_000
+    : 5 * 60_000; // padrão: 5 minutos
+
+  // unref: o timer não deve, sozinho, manter o processo vivo. Em produção quem
+  // segura o event loop é o socket do gateway; sem isto qualquer processo que
+  // só liga o guardião (teste, script) nunca termina.
+  setInterval(() => reassert(client, 'refresh timer'), intervalMs).unref();
 }
 
 module.exports = { startPresenceKeeper, setDesiredPresence };
