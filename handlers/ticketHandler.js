@@ -3,6 +3,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   StringSelectMenuBuilder,
+  UserSelectMenuBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -48,7 +49,22 @@ const stmts = {
   insertRating: db.prepare(
     'INSERT INTO ticket_ratings (guild_id, ticket_id, agent_id, user_id, stars, comment) VALUES (?, ?, ?, ?, ?, ?)'
   ),
+  // Transferência de atendimento: mantém o claimed_at original.
+  reassign: db.prepare('UPDATE tickets SET claimed_by = ? WHERE id = ?'),
 };
+
+/**
+ * Cooldown de notificação de atendente, por guild/canal/usuário.
+ * chave: `${guildId}:${channelId}:${userId}` → epoch em ms quando expira
+ * @type {Map<string, number>}
+ */
+const notifyCooldown = new Map();
+
+/**
+ * Canais de voz criados pelo Painel Admin, por id do ticket.
+ * @type {Map<number, string[]>}
+ */
+const activeTicketCalls = new Map();
 
 const STAR_LABELS = {
   1: 'Muito ruim',
@@ -201,6 +217,16 @@ async function handleCategorySelect(interaction) {
       .setEmoji(emoji(interaction.guild, 'ticket_claim'))
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
+      .setCustomId(`ticket_notify_staff_${ticketId}`)
+      .setLabel('Notificar atendente')
+      .setEmoji(emoji(interaction.guild, 'ticket_notify'))
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`ticket_admin_open_${ticketId}`)
+      .setLabel('Painel Admin')
+      .setEmoji(emoji(interaction.guild, 'ticket_admin'))
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
       .setCustomId(`ticket_close_${ticketId}`)
       .setLabel('Fechar')
       .setEmoji(emoji(interaction.guild, 'ticket_close'))
@@ -260,6 +286,442 @@ async function loadTicket(interaction, ticketId) {
     return null;
   }
   return ticket;
+}
+
+/** Procura o cargo de suporte específico da categoria deste ticket (se existir). */
+function findCategorySupportRoleId(guildId, categoryLabel) {
+  try {
+    const cats = stmts.categories.all(guildId);
+    const match = cats.find((c) => c.label === categoryLabel && c.support_role_id);
+    return match?.support_role_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Botão "Notificar atendente" — menciona o(s) cargo(s) de suporte no próprio ticket. */
+async function handleNotifyStaff(interaction, ticketId) {
+  const ticket = await loadTicket(interaction, ticketId);
+  if (!ticket) return undefined;
+
+  const config = getTicketConfig(interaction.guild.id);
+  const categoryRoleId = findCategorySupportRoleId(interaction.guild.id, ticket.category_label);
+  const roleIds = categoryRoleId ? [categoryRoleId] : config.permissions.staffRoleIds;
+
+  if (!roleIds.length) {
+    return refuse(interaction, 'Nenhum cargo de suporte foi configurado para este servidor.');
+  }
+
+  // Cooldown por usuário/canal.
+  const key = `${interaction.guild.id}:${interaction.channel.id}:${interaction.user.id}`;
+  const now = Date.now();
+  const expiresAt = notifyCooldown.get(key) ?? 0;
+  if (expiresAt > now) {
+    const seconds = Math.ceil((expiresAt - now) / 1000);
+    const minutes = Math.ceil(seconds / 60);
+    return interaction.reply({
+      embeds: [
+        errorEmbed(
+          `Aguarde ${minutes >= 1 ? `${minutes} minuto${minutes > 1 ? 's' : ''}` : `${seconds} segundos`} para notificar novamente.`
+        ),
+      ],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  const mentions = roleIds.map((r) => `<@&${r}>`).join(' ');
+  await interaction.reply({
+    content: `${mentions} atendimento solicitado por ${interaction.user}.`,
+    allowedMentions: { roles: roleIds, users: [] },
+  });
+  notifyCooldown.set(key, now + 60_000);
+}
+
+/** Constrói o payload do Painel Admin (ephemeral). */
+function buildAdminPanelPayload(guild, ticketId) {
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`ticket_admin_select_${ticketId}`)
+    .setPlaceholder('Selecione uma ação')
+    .addOptions(
+      {
+        label: 'Notificar',
+        description: 'Envia uma DM ao autor do ticket',
+        value: 'notify_user',
+        emoji: emoji(guild, 'ticket_admin_notify_user'),
+      },
+      {
+        label: 'Criar Call',
+        description: 'Cria um canal de voz privado',
+        value: 'create_call',
+        emoji: emoji(guild, 'ticket_admin_create_call'),
+      },
+      {
+        label: 'Adicionar membros',
+        description: 'Permite que usuários entrem no ticket',
+        value: 'add_members',
+        emoji: emoji(guild, 'ticket_admin_add_members'),
+      },
+      {
+        label: 'Remover membros',
+        description: 'Revoga o acesso de usuários ao ticket',
+        value: 'remove_members',
+        emoji: emoji(guild, 'ticket_admin_remove_members'),
+      },
+      {
+        label: 'Transferir atendimento',
+        description: 'Passa o ticket para outro atendente',
+        value: 'transfer',
+        emoji: emoji(guild, 'ticket_admin_transfer'),
+      },
+      {
+        label: 'Renomear ticket',
+        description: 'Altera o nome do canal',
+        value: 'rename',
+        emoji: emoji(guild, 'ticket_admin_rename'),
+      }
+    );
+
+  return {
+    embeds: [
+      baseEmbed({
+        title: 'Painel Admin',
+        description: 'Escolha uma opção abaixo:',
+      }),
+    ],
+    components: [new ActionRowBuilder().addComponents(select)],
+    flags: MessageFlags.Ephemeral,
+  };
+}
+
+/** Abre o Painel Admin (ephemeral). */
+async function handleAdminOpen(interaction, ticketId) {
+  const ticket = await loadTicket(interaction, ticketId);
+  if (!ticket) return undefined;
+  const config = getTicketConfig(interaction.guild.id);
+  if (!isTicketStaff(interaction.member, config)) {
+    return refuse(interaction, 'Apenas a equipe de suporte pode usar este painel.');
+  }
+  return interaction.reply(buildAdminPanelPayload(interaction.guild, ticket.id));
+}
+
+/** Seleção de ação no Painel Admin. */
+async function handleAdminSelect(interaction, ticketId) {
+  const ticket = await loadTicket(interaction, ticketId);
+  if (!ticket) return undefined;
+  const config = getTicketConfig(interaction.guild.id);
+  if (!isTicketStaff(interaction.member, config)) {
+    return refuse(interaction, 'Apenas a equipe de suporte pode usar este painel.');
+  }
+
+  const action = interaction.values?.[0];
+  if (!action) return interaction.update({ components: [], embeds: [errorEmbed('Nenhuma opção selecionada.')] });
+
+  if (action === 'notify_user') {
+    const user = await interaction.client.users.fetch(ticket.user_id).catch(() => null);
+    if (!user) return interaction.update({ components: [], embeds: [errorEmbed('Autor do ticket não encontrado.')] });
+    await user
+      .send({
+        embeds: [
+          baseEmbed({
+            title: `${emoji(interaction.guild, 'ticket')} Notificação do atendimento`,
+            description:
+              `Olá! A equipe de **${interaction.guild.name}** enviou uma notificação sobre seu ticket ` +
+              `#${ticket.id} (${ticket.category_label ?? 'sem categoria'}). Responda no canal do ticket quando puder.`,
+          }),
+        ],
+      })
+      .catch(() => {});
+    return interaction.update({ components: [], embeds: [successEmbed('Notificação enviada por DM ao autor.')] });
+  }
+
+  if (action === 'create_call') {
+    // Tenta criar um canal de voz privado para o ticket.
+    const categoryRoleId = findCategorySupportRoleId(interaction.guild.id, ticket.category_label);
+    const staffRoleIds = [
+      ...new Set([...(categoryRoleId ? [categoryRoleId] : []), ...config.permissions.staffRoleIds].filter(Boolean)),
+    ];
+    const overwrites = [
+      { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect] },
+      { id: ticket.user_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak] },
+      ...staffRoleIds.map((id) => ({
+        id,
+        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak],
+      })),
+    ];
+    try {
+      const voice = await interaction.guild.channels.create({
+        name: `call-ticket-${ticket.id}`.slice(0, 90),
+        type: ChannelType.GuildVoice,
+        parent: interaction.channel.parentId ?? undefined,
+        permissionOverwrites: overwrites,
+      });
+      const arr = activeTicketCalls.get(ticket.id) ?? [];
+      activeTicketCalls.set(ticket.id, [...arr, voice.id]);
+      await interaction.channel.send({
+        embeds: [
+          baseEmbed({
+            title: 'Canal de voz criado',
+            description: `${interaction.user} criou ${voice} para este atendimento.`,
+            color: colors.info,
+          }),
+        ],
+      });
+      return interaction.update({ components: [], embeds: [successEmbed(`Canal de voz criado: ${voice}.`)] });
+    } catch (err) {
+      console.error('[tickets] Falha ao criar call:', err);
+      return interaction.update({ components: [], embeds: [errorEmbed('Não consegui criar o canal de voz.')] });
+    }
+  }
+
+  if (action === 'add_members') {
+    const selector = new UserSelectMenuBuilder()
+      .setCustomId(`ticket_admin_add_${ticket.id}`)
+      .setPlaceholder('Selecione membros para adicionar')
+      .setMinValues(1)
+      .setMaxValues(10);
+    return interaction.update({
+      embeds: [baseEmbed({ title: 'Adicionar Membros', description: 'Selecione quem deve ser adicionado ao ticket.' })],
+      components: [new ActionRowBuilder().addComponents(selector)],
+    });
+  }
+
+  if (action === 'remove_members') {
+    const selector = new UserSelectMenuBuilder()
+      .setCustomId(`ticket_admin_remove_${ticket.id}`)
+      .setPlaceholder('Selecione membros para remover')
+      .setMinValues(1)
+      .setMaxValues(10);
+    return interaction.update({
+      embeds: [baseEmbed({ title: 'Remover Membros', description: 'Selecione quem deve ser removido do ticket.' })],
+      components: [new ActionRowBuilder().addComponents(selector)],
+    });
+  }
+
+  if (action === 'transfer') {
+    const selector = new UserSelectMenuBuilder()
+      .setCustomId(`ticket_admin_transfer_${ticket.id}`)
+      .setPlaceholder('Selecione o novo atendente')
+      .setMinValues(1)
+      .setMaxValues(1);
+    return interaction.update({
+      embeds: [baseEmbed({ title: 'Transferir Atendimento', description: 'Escolha o novo atendente responsável.' })],
+      components: [new ActionRowBuilder().addComponents(selector)],
+    });
+  }
+
+  if (action === 'rename') {
+    const modal = new ModalBuilder()
+      .setCustomId(`ticket_admin_renamemodal_${ticket.id}`)
+      .setTitle('Renomear Ticket')
+      .addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId('name')
+            .setLabel('Novo nome do canal')
+            .setPlaceholder('ex.: ticket-suporte-joao')
+            .setStyle(TextInputStyle.Short)
+            .setMaxLength(90)
+        )
+      );
+    return interaction.showModal(modal);
+  }
+
+  return interaction.update({ components: [], embeds: [errorEmbed('Ação inválida.')] });
+}
+
+/** Adiciona membros selecionados ao ticket (permissões de autor). */
+async function handleAdminAddMembers(interaction, ticketId) {
+  const ticket = await loadTicket(interaction, ticketId);
+  if (!ticket) return undefined;
+  const config = getTicketConfig(interaction.guild.id);
+  if (!isTicketStaff(interaction.member, config)) {
+    return refuse(interaction, 'Apenas a equipe de suporte pode fazer isso.');
+  }
+
+  const userIds = interaction.values ?? [];
+  const added = [];
+  for (const id of userIds) {
+    try {
+      await interaction.channel.permissionOverwrites.edit(
+        id,
+        Object.fromEntries(AUTHOR_ALLOW.map((flag) => [flag, true])),
+        { reason: `Adicionado ao ticket #${ticket.id} por ${interaction.user.tag}` }
+      );
+      added.push(id);
+    } catch (err) {
+      console.error('[tickets] Falha ao adicionar membro ao ticket:', err.message);
+    }
+  }
+  if (added.length) {
+    await interaction.channel
+      .send({
+        content: `${interaction.user} adicionou ${added.map((i) => `<@${i}>`).join(', ')} ao ticket.`,
+        allowedMentions: { users: added },
+      })
+      .catch(() => {});
+  }
+  return interaction.update({ components: [], embeds: [successEmbed(`Membros adicionados: ${added.length}.`)] });
+}
+
+/** Remove membros selecionados do ticket (exceto autor e equipe). */
+async function handleAdminRemoveMembers(interaction, ticketId) {
+  const ticket = await loadTicket(interaction, ticketId);
+  if (!ticket) return undefined;
+  const config = getTicketConfig(interaction.guild.id);
+  if (!isTicketStaff(interaction.member, config)) {
+    return refuse(interaction, 'Apenas a equipe de suporte pode fazer isso.');
+  }
+  const userIds = interaction.values ?? [];
+  const removed = [];
+  for (const id of userIds) {
+    if (id === ticket.user_id) continue;
+    const member = await interaction.guild.members.fetch(id).catch(() => null);
+    if (isTicketStaff(member, config)) continue;
+    try {
+      await interaction.channel.permissionOverwrites.delete(
+        id,
+        `Removido do ticket #${ticket.id} por ${interaction.user.tag}`
+      );
+      removed.push(id);
+    } catch (err) {
+      console.error('[tickets] Falha ao remover membro do ticket:', err.message);
+    }
+  }
+  if (removed.length) {
+    await interaction.channel
+      .send({
+        content: `${interaction.user} removeu ${removed.map((i) => `<@${i}>`).join(', ')} do ticket.`,
+        allowedMentions: { users: removed },
+      })
+      .catch(() => {});
+  }
+  return interaction.update({ components: [], embeds: [successEmbed(`Membros removidos: ${removed.length}.`)] });
+}
+
+/** Transfere o atendimento para outro atendente, registrando a troca. */
+async function handleAdminTransfer(interaction, ticketId) {
+  const ticket = await loadTicket(interaction, ticketId);
+  if (!ticket) return undefined;
+  const config = getTicketConfig(interaction.guild.id);
+  if (!isTicketStaff(interaction.member, config)) {
+    return refuse(interaction, 'Apenas a equipe de suporte pode fazer isso.');
+  }
+  const [targetId] = interaction.values ?? [];
+  if (!targetId)
+    return interaction.update({ components: [], embeds: [errorEmbed('Nenhum atendente selecionado.')] });
+
+  if (targetId === ticket.user_id) {
+    return interaction.update({ components: [], embeds: [errorEmbed('Não é possível transferir para o autor do ticket.')] });
+  }
+
+  const targetMember = await interaction.guild.members.fetch(targetId).catch(() => null);
+  if (!isTicketStaff(targetMember, config)) {
+    return interaction.update({ components: [], embeds: [errorEmbed('O usuário selecionado não faz parte da equipe.')] });
+  }
+  if (ticket.claimed_by === targetId) {
+    return interaction.update({ components: [], embeds: [errorEmbed('Este atendente já é o responsável pelo ticket.')] });
+  }
+
+  const previous = ticket.claimed_by;
+  stmts.reassign.run(targetId, ticket.id);
+  const updated = stmts.ticketById.get(ticket.id);
+
+  await interaction.channel.send({
+    embeds: [
+      baseEmbed({
+        title: 'Atendimento transferido',
+        description: `${interaction.user} transferiu o ticket para <@${targetId}>.`,
+        color: colors.info,
+      }),
+    ],
+    allowedMentions: { users: [targetId] },
+  });
+
+  const logChannel = await resolveTicketLogChannel(interaction.guild);
+  await logChannel
+    ?.send({
+      embeds: [
+        baseEmbed({
+          title: '🔁 Transferência de atendimento',
+          description: `Ticket **#${updated.id}** (${updated.category_label ?? 'sem categoria'}) transferido.`,
+          color: colors.info,
+          fields: [
+            { name: 'De', value: previous ? `<@${previous}>` : 'Não reivindicado', inline: true },
+            { name: 'Para', value: `<@${targetId}>`, inline: true },
+            { name: 'Por', value: `${interaction.user}`, inline: true },
+          ],
+        }),
+      ],
+      allowedMentions: { parse: [] },
+    })
+    .catch(() => {});
+
+  return interaction.update({ components: [], embeds: [successEmbed('Atendimento transferido com sucesso.')] });
+}
+
+/** Solicita novo nome e renomeia o canal do ticket. */
+async function handleAdminRename(interaction, ticketId) {
+  const ticket = await loadTicket(interaction, ticketId);
+  if (!ticket) return undefined;
+  const config = getTicketConfig(interaction.guild.id);
+  if (!isTicketStaff(interaction.member, config)) {
+    return refuse(interaction, 'Apenas a equipe de suporte pode fazer isso.');
+  }
+  const modal = new ModalBuilder()
+    .setCustomId(`ticket_admin_renamemodal_${ticket.id}`)
+    .setTitle('Renomear Ticket')
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('name')
+          .setLabel('Novo nome do canal')
+          .setPlaceholder('ex.: ticket-suporte-joao')
+          .setStyle(TextInputStyle.Short)
+          .setMaxLength(90)
+      )
+    );
+  return interaction.showModal(modal);
+}
+
+/** Submissão do modal de renomear. */
+async function handleAdminRenameModal(interaction, ticketId) {
+  const ticket = stmts.ticketById.get(Number(ticketId));
+  if (!ticket || ticket.guild_id !== interaction.guild.id || interaction.channel.id !== ticket.channel_id) {
+    return interaction.reply({ embeds: [errorEmbed('Ticket não encontrado.')], flags: MessageFlags.Ephemeral });
+  }
+  const config = getTicketConfig(interaction.guild.id);
+  if (!isTicketStaff(interaction.member, config)) {
+    return interaction.reply({
+      embeds: [errorEmbed('Apenas a equipe de suporte pode fazer isso.')],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+  const raw = interaction.fields.getTextInputValue('name').trim();
+  const sanitized = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]+/gi, '-')
+    .replace(/-{2,}/g, '-')
+    .slice(0, 90)
+    .replace(/^-+|-+$/g, '');
+  if (!sanitized) {
+    return interaction.reply({ embeds: [errorEmbed('O nome não pode ficar vazio.')], flags: MessageFlags.Ephemeral });
+  }
+  try {
+    await interaction.channel.setName(sanitized, `Renomeado por ${interaction.user.tag}`);
+    await interaction.channel.send({
+      embeds: [
+        baseEmbed({
+          title: 'Canal renomeado',
+          description: `${interaction.user} renomeou este ticket para \`${sanitized}\`.`,
+          color: colors.info,
+        }),
+      ],
+    });
+    return interaction.reply({ embeds: [successEmbed('Nome do canal atualizado.')], flags: MessageFlags.Ephemeral });
+  } catch (err) {
+    console.error('[tickets] Falha ao renomear canal:', err.message);
+    return interaction.reply({ embeds: [errorEmbed('Não consegui renomear o canal.')], flags: MessageFlags.Ephemeral });
+  }
 }
 
 /** Botão "Reivindicar" — exclusivo da equipe, o autor do ticket não pode assumir. */
@@ -633,6 +1095,21 @@ async function handleClose(interaction, ticketId) {
 
   setTimeout(() => {
     interaction.channel.delete(`Ticket #${closed.id} fechado por ${interaction.user.tag}`).catch(() => {});
+    // Apaga calls privadas criadas para este ticket.
+    const created = activeTicketCalls.get(closed.id) ?? [];
+    activeTicketCalls.delete(closed.id);
+    for (const voiceId of created) {
+      interaction.guild.channels
+        .fetch(voiceId)
+        .then((ch) => ch?.delete(`Call do ticket #${closed.id} encerrado`))
+        .catch(() => {});
+    }
+    // Fallback: tenta achar por nome se o id não estiver registrado (reinício do processo)
+    if (!created.length) {
+      const name = `call-ticket-${closed.id}`;
+      const maybe = interaction.guild.channels.cache.filter((c) => c.type === ChannelType.GuildVoice && c.name === name);
+      for (const [, ch] of maybe) ch.delete(`Call do ticket #${closed.id} encerrado`).catch(() => {});
+    }
   }, delayMs);
 }
 
@@ -740,6 +1217,14 @@ async function routeTicketInteraction(interaction) {
   if (customId.startsWith('ticket_reopen_')) return handleReopen(interaction, customId.slice('ticket_reopen_'.length));
   if (customId.startsWith('ticket_ratemodal_')) return handleRatingModal(interaction, customId.slice('ticket_ratemodal_'.length));
   if (customId.startsWith('ticket_rate_')) return handleRatingButton(interaction, customId.slice('ticket_rate_'.length));
+  if (customId.startsWith('ticket_notify_staff_')) return handleNotifyStaff(interaction, customId.slice('ticket_notify_staff_'.length));
+  if (customId.startsWith('ticket_admin_open_')) return handleAdminOpen(interaction, customId.slice('ticket_admin_open_'.length));
+  if (customId.startsWith('ticket_admin_select_')) return handleAdminSelect(interaction, customId.slice('ticket_admin_select_'.length));
+  if (customId.startsWith('ticket_admin_add_')) return handleAdminAddMembers(interaction, customId.slice('ticket_admin_add_'.length));
+  if (customId.startsWith('ticket_admin_remove_')) return handleAdminRemoveMembers(interaction, customId.slice('ticket_admin_remove_'.length));
+  if (customId.startsWith('ticket_admin_transfer_')) return handleAdminTransfer(interaction, customId.slice('ticket_admin_transfer_'.length));
+  if (customId.startsWith('ticket_admin_rename_')) return handleAdminRename(interaction, customId.slice('ticket_admin_rename_'.length));
+  if (customId.startsWith('ticket_admin_renamemodal_')) return handleAdminRenameModal(interaction, customId.slice('ticket_admin_renamemodal_'.length));
   return null;
 }
 
