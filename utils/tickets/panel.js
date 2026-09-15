@@ -64,6 +64,7 @@ function buildTicketPanel(guild, config) {
         description: config.panel.description ?? DEFAULT_DESCRIPTION,
         // `null` da paleta cai na cor padrão do baseEmbed.
         color: resolveColor(config.panel.color) ?? undefined,
+        image: config.panel.imageUrl ?? undefined,
       }),
     ],
     components: buildTicketPanelComponents(guild, config),

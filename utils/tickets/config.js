@@ -16,6 +16,7 @@ const { getGuildConfig, setGuildConfig } = require('../../database/db');
 // Mesma semântica de "sim"/"1" que os modais do Discord produzem; a função é
 // genérica e já existe, não vale reescrever.
 const { normalizeBool } = require('../levels/config');
+const { isHttpUrl } = require('../media');
 const settings = require('../../config/settings');
 
 /** @typedef {ReturnType<typeof normalizeTicketConfig>} TicketConfig */
@@ -52,6 +53,12 @@ function normalizeText(value, max, fallback = null) {
   if (typeof value !== 'string') return fallback;
   const clean = value.trim();
   return clean ? clean.slice(0, max) : fallback;
+}
+
+/** Só URL http(s) entra: o embed recusa o resto e derruba o envio do painel. */
+function normalizeUrl(value) {
+  const clean = typeof value === 'string' ? value.trim() : '';
+  return clean && isHttpUrl(clean) ? clean.slice(0, 1024) : null;
 }
 
 /** Inteiro dentro da faixa; entrada não numérica volta ao default. */
@@ -94,6 +101,7 @@ function normalizeTicketConfig(raw) {
       color: normalizeText(panel.color, 32),
       buttonLabel: normalizeText(panel.buttonLabel, 80, DEFAULTS.panelButtonLabel),
       buttonEmoji: normalizeText(panel.buttonEmoji, 64),
+      imageUrl: normalizeUrl(panel.imageUrl),
     },
     permissions: {
       staffRoleIds: normalizeIds(permissions.staffRoleIds),
