@@ -46,6 +46,15 @@ const REGISTRY = Object.freeze({
   ticket_close: { label: 'Fechar ticket', default: '🔒', category: 'tickets', usage: 'Botão de fechar o ticket' },
   ticket_rating: { label: 'Avaliar ticket', default: '⭐', category: 'tickets', usage: 'Botão de avaliar o atendimento' },
   ticket_stats: { label: 'Relatório de tickets', default: '📊', category: 'tickets', usage: 'Título do /ticket-stats' },
+  // Painel e ações administrativas de ticket
+  ticket_notify: { label: 'Notificar atendente', default: '📣', category: 'tickets', usage: 'Botão de notificação para a equipe no canal do ticket' },
+  ticket_admin: { label: 'Painel Admin', default: '🛠️', category: 'tickets', usage: 'Botão que abre o painel administrativo do ticket' },
+  ticket_admin_notify_user: { label: 'Notificar autor', default: '📩', category: 'tickets', usage: 'Opção do Painel Admin para enviar DM ao autor' },
+  ticket_admin_create_call: { label: 'Criar call', default: '🎧', category: 'tickets', usage: 'Opção do Painel Admin para criar canal de voz' },
+  ticket_admin_add_members: { label: 'Adicionar membros', default: '➕', category: 'tickets', usage: 'Opção do Painel Admin para adicionar membros ao ticket' },
+  ticket_admin_remove_members: { label: 'Remover membros', default: '➖', category: 'tickets', usage: 'Opção do Painel Admin para remover membros do ticket' },
+  ticket_admin_transfer: { label: 'Transferir atendimento', default: '🔁', category: 'tickets', usage: 'Opção do Painel Admin para transferir o responsável' },
+  ticket_admin_rename: { label: 'Renomear ticket', default: '✏️', category: 'tickets', usage: 'Opção do Painel Admin para renomear o canal' },
 
   giveaway: { label: 'Sorteio', default: '🎉', category: 'giveaway', usage: 'Botão de participar do sorteio' },
   giveaway_winner: { label: 'Vencedor', default: '🏆', category: 'giveaway', usage: 'Anúncio dos ganhadores' },
