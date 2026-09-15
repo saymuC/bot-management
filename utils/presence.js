@@ -187,6 +187,73 @@ function presenceWarnings(config) {
   return warnings;
 }
 
+/** Soma de membros por guilda usando apenas o cache, sem fetch. */
+function sumMembersFromCache(client) {
+  try {
+    const guilds = client?.guilds?.cache;
+    if (!guilds?.size) return 0;
+    let total = 0;
+    for (const g of guilds.values()) total += Number(g?.memberCount ?? 0);
+    return total;
+  } catch {
+    return 0;
+  }
+}
+
+/** Determina uma identificação de cluster/shard, se existir. */
+function getClusterLabel(client) {
+  const envCluster = process.env.CLUSTER ?? process.env.CLUSTER_ID ?? process.env.SHARD_ID;
+  if (envCluster) return String(envCluster);
+  try {
+    const shard = client?.shard;
+    if (!shard) return '';
+    const ids = Array.isArray(shard.ids) ? shard.ids : [];
+    const first = ids.length ? ids[0] : 0;
+    const count = typeof shard.count !== 'undefined' ? shard.count : undefined;
+    return typeof count === 'number' ? `${first}/${count}` : String(first);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Coleta variáveis dinâmicas para resolver placeholders do texto da presença.
+ * Não faz nenhuma chamada remota — só lê o cache atual do client.
+ */
+function collectPresenceVars(client) {
+  const guilds = client?.guilds?.cache?.size ?? 0;
+  const users = sumMembersFromCache(client);
+  const cluster = getClusterLabel(client);
+  return {
+    guilds,
+    servers: guilds,
+    users,
+    members: users,
+    cluster,
+  };
+}
+
+/** Substitui chaves {var} por valores de vars (case-insensitive). */
+function resolveTextPlaceholders(text, vars) {
+  const source = typeof text === 'string' ? text : '';
+  return source.replace(/\{(\w+)\}/g, (m, key) => {
+    const v = vars[key.toLowerCase()];
+    return v === undefined || v === null ? m : String(v);
+  });
+}
+
+/**
+ * Gera uma presença com os placeholders de texto resolvidos.
+ * Ainda respeita o limite de 128 chars por campo.
+ */
+function resolvePresenceTemplates(client, presence) {
+  const cfg = normalizePresence(presence);
+  const vars = collectPresenceVars(client);
+  const name = cleanText(resolveTextPlaceholders(cfg.name, vars), cfg.name);
+  const state = cleanText(resolveTextPlaceholders(cfg.state, vars), cfg.state);
+  return { ...cfg, name, state };
+}
+
 module.exports = {
   STATUSES,
   ACTIVITIES,
@@ -200,4 +267,5 @@ module.exports = {
   applyPresence,
   describePresence,
   presenceWarnings,
+  resolvePresenceTemplates,
 };

@@ -18,6 +18,6 @@ module.exports = {
 
     // Cada abertura começa do que está no ar, sem herdar rascunho antigo.
     clearDraft(interaction.user.id);
-    return respond(interaction, buildStatusPanel(interaction.user.id));
+    return respond(interaction, buildStatusPanel(interaction.client, interaction.user.id));
   },
 };
