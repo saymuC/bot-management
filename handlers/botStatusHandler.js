@@ -30,6 +30,7 @@ const {
   savePresence,
   describePresence,
   presenceWarnings,
+  resolvePresenceTemplates,
 } = require('../utils/presence');
 const { setDesiredPresence } = require('../utils/presenceKeeper');
 const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
@@ -96,6 +97,12 @@ function panelEmbed(draft, applied) {
   ];
 
   if (warnings.length) fields.push({ name: '⚠️ Atenção', value: warnings.map((w) => `• ${w}`).join('\n') });
+
+  fields.push({
+    name: 'Variáveis no texto',
+    value:
+      'Use placeholders em `Nome` e `State`: `{guilds}`/`{servers}` = servidores · `{users}` = usuários · `{cluster}` = cluster/shard.',
+  });
 
   fields.push({
     name: '🟣 Bolinha roxa (em live) e botões',
@@ -171,8 +178,9 @@ function panelComponents(draft, applied) {
  * Payload do painel. `notice` é a linha de feedback da última ação.
  * @param {string} userId dono do rascunho
  */
-function buildStatusPanel(userId, notice = '') {
-  const applied = getSavedPresence();
+function buildStatusPanel(client, userId, notice = '') {
+  const appliedRaw = getSavedPresence();
+  const applied = resolvePresenceTemplates(client, appliedRaw);
   const draft = getDraft(userId);
   const header = ['🎛️ **Painel de status do bot** — só você vê isto.'];
   if (notice) header.push(notice);
@@ -188,7 +196,7 @@ function buildStatusPanel(userId, notice = '') {
 const safeAck = makeSafeAck('bot-status');
 
 function redraw(interaction, notice) {
-  return safeAck(interaction, () => interaction.update(buildStatusPanel(interaction.user.id, notice)));
+  return safeAck(interaction, () => interaction.update(buildStatusPanel(interaction.client, interaction.user.id, notice)));
 }
 
 function handleTextsModal(interaction, draft) {
@@ -199,7 +207,7 @@ function handleTextsModal(interaction, draft) {
       new TextInputBuilder()
         .setCustomId('name')
         .setLabel('Nome (texto principal)')
-        .setPlaceholder('o servidor 👀')
+        .setPlaceholder('ex: {servers} servidores — {users} usuários')
         .setStyle(TextInputStyle.Short)
         .setMaxLength(128)
         .setRequired(false)
@@ -207,7 +215,7 @@ function handleTextsModal(interaction, draft) {
       new TextInputBuilder()
         .setCustomId('state')
         .setLabel('Linha extra (state) — opcional')
-        .setPlaceholder('No tipo Personalizado, este é o texto exibido')
+        .setPlaceholder('Você pode usar {guilds}/{servers}, {users} e {cluster}')
         .setStyle(TextInputStyle.Short)
         .setMaxLength(128)
         .setRequired(false)
@@ -267,7 +275,8 @@ async function handleApply(interaction) {
     // Vai pelo guardião para que o valor novo seja o reafirmado nas reconexões.
     const applied = setDesiredPresence(interaction.client, draft);
     if (!applied) return redraw(interaction, '⚠️ Ainda estou me conectando ao Discord. Tente de novo em alguns segundos.');
-    savePresence(applied);
+    // Persistimos o rascunho bruto (com placeholders), para manter variáveis dinâmicas.
+    savePresence(draft);
     clearDraft(interaction.user.id);
     console.log(`[presence] ${interaction.user.tag} alterou para: ${describePresence(applied)}`);
 
