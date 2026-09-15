@@ -89,7 +89,10 @@ function startPresenceKeeper(client) {
     ? Math.max(1, minFromEnv) * 60_000
     : 5 * 60_000; // padrão: 5 minutos
 
-  setInterval(() => reassert(client, 'refresh timer'), intervalMs);
+  // unref: o timer não deve, sozinho, manter o processo vivo. Em produção quem
+  // segura o event loop é o socket do gateway; sem isto qualquer processo que
+  // só liga o guardião (teste, script) nunca termina.
+  setInterval(() => reassert(client, 'refresh timer'), intervalMs).unref();
 }
 
 module.exports = { startPresenceKeeper, setDesiredPresence };
