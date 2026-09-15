@@ -10,12 +10,14 @@ const {
   PermissionFlagsBits,
   MessageFlags,
 } = require('discord.js');
-const { db, getGuildConfig } = require('../database/db');
+const { db } = require('../database/db');
 const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
 const { fetchChannelHistory, buildHtmlTranscript } = require('../utils/transcript');
 const { durationBetween, formatDuration, parseSqlDate } = require('../utils/time');
-const { colors, ticket: ticketSettings } = require('../config/settings');
+const { colors } = require('../config/settings');
 const { emoji } = require('../utils/emojis');
+const { getTicketConfig, resolveTicketLogChannelId } = require('../utils/tickets/config');
+const { buildTicketPanelComponents } = require('../utils/tickets/panel');
 
 const stmts = {
   categories: db.prepare('SELECT * FROM ticket_categories WHERE guild_id = ?'),
@@ -47,19 +49,11 @@ const STAR_LABELS = {
 };
 
 /**
- * Botão inicial do painel de tickets.
- * @param {import('discord.js').Guild} guild dono do painel — define o emoji usado
+ * Botão inicial do painel de tickets, com o rótulo e o emoji configurados.
+ * @param {import('discord.js').Guild} guild dono do painel
  */
 function buildPanelComponents(guild) {
-  return [
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('ticket_open')
-        .setLabel('Abrir Ticket')
-        .setEmoji(emoji(guild, 'ticket'))
-        .setStyle(ButtonStyle.Primary)
-    ),
-  ];
+  return buildTicketPanelComponents(guild, getTicketConfig(guild.id));
 }
 
 /**
@@ -67,8 +61,7 @@ function buildPanelComponents(guild) {
  * não está configurado, para não perder transcripts em servidores antigos.
  */
 async function resolveTicketLogChannel(guild) {
-  const config = getGuildConfig(guild.id);
-  const channelId = config?.ticket_log_channel_id || config?.log_channel_id;
+  const channelId = resolveTicketLogChannelId(guild.id);
   if (!channelId) return null;
 
   const channel = await guild.channels.fetch(channelId).catch(() => null);
@@ -77,14 +70,25 @@ async function resolveTicketLogChannel(guild) {
 
 /** Clique em "Abrir Ticket" → valida o limite de tickets abertos e mostra o select. */
 async function handleOpenButton(interaction) {
+  const config = getTicketConfig(interaction.guild.id);
+
+  // Painel publicado continua no canal depois de desligar o sistema: a recusa
+  // acontece aqui, no clique, e não ao apagar mensagem de ninguém.
+  if (!config.enabled) {
+    return interaction.reply({
+      embeds: [errorEmbed('O sistema de tickets está desativado neste servidor.')],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
   // O limite é checado aqui, antes de escolher categoria: evita o usuário
   // percorrer o fluxo inteiro para só então descobrir que está no limite.
   const openCount = stmts.openCount.get(interaction.guild.id, interaction.user.id).n;
-  if (openCount >= ticketSettings.maxOpenPerUser) {
+  if (openCount >= config.maxOpenPerUser) {
     return interaction.reply({
       embeds: [
         errorEmbed(
-          `Você já tem **${openCount}** ticket(s) aberto(s), o máximo permitido é **${ticketSettings.maxOpenPerUser}**.\n` +
+          `Você já tem **${openCount}** ticket(s) aberto(s), o máximo permitido é **${config.maxOpenPerUser}**.\n` +
             'Feche um dos tickets em andamento antes de abrir outro.'
         ),
       ],
@@ -95,7 +99,7 @@ async function handleOpenButton(interaction) {
   const categories = stmts.categories.all(interaction.guild.id);
   if (!categories.length) {
     return interaction.reply({
-      embeds: [errorEmbed('Nenhuma categoria de ticket configurada. Um admin deve usar `/ticket-add-category`.')],
+      embeds: [errorEmbed('Nenhuma categoria de ticket configurada. Um admin deve usar `/ticket-config`.')],
       flags: MessageFlags.Ephemeral,
     });
   }
@@ -135,8 +139,14 @@ async function handleCategorySelect(interaction) {
 
   await interaction.deferUpdate();
 
-  const config = getGuildConfig(interaction.guild.id);
-  const parentId = category.target_category_id || config?.ticket_category_id || null;
+  const config = getTicketConfig(interaction.guild.id);
+  const parentId = category.target_category_id || config.defaultParentCategoryId || null;
+
+  // O cargo da categoria e os cargos gerais de atendimento entram no mesmo
+  // conjunto: id repetido em dois overwrites é recusado pelo Discord.
+  const staffRoleIds = [
+    ...new Set([category.support_role_id, ...config.permissions.staffRoleIds].filter(Boolean)),
+  ];
 
   const overwrites = [
     { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
@@ -149,18 +159,16 @@ async function handleCategorySelect(interaction) {
         PermissionFlagsBits.AttachFiles,
       ],
     },
-  ];
-  if (category.support_role_id) {
-    overwrites.push({
-      id: category.support_role_id,
+    ...staffRoleIds.map((id) => ({
+      id,
       allow: [
         PermissionFlagsBits.ViewChannel,
         PermissionFlagsBits.SendMessages,
         PermissionFlagsBits.ReadMessageHistory,
         PermissionFlagsBits.ManageMessages,
       ],
-    });
-  }
+    })),
+  ];
 
   const slug = category.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 20);
   let channel;
@@ -197,7 +205,8 @@ async function handleCategorySelect(interaction) {
       .setStyle(ButtonStyle.Danger)
   );
 
-  const mention = category.support_role_id ? `<@&${category.support_role_id}>` : '';
+  const mention =
+    config.behavior.pingSupportRole && category.support_role_id ? `<@&${category.support_role_id}>` : '';
   await channel.send({
     content: `${interaction.user} ${mention}`.trim(),
     embeds: [
@@ -316,6 +325,39 @@ function buildRatingRequest(ticket, guild) {
   };
 }
 
+/**
+ * Transcript HTML do canal, ou `null` se falhar.
+ *
+ * A falha não interrompe o fechamento: o ticket já está fechado no banco, e um
+ * canal que não desaparece porque o histórico não foi lido é pior que um log sem
+ * anexo.
+ */
+async function buildTranscriptFile(interaction, closed, handlingMs) {
+  try {
+    const messages = await fetchChannelHistory(interaction.channel);
+    const tagOf = async (userId) =>
+      `${(await interaction.client.users.fetch(userId).catch(() => null))?.tag ?? userId} (${userId})`;
+
+    return buildHtmlTranscript({
+      ticket: closed,
+      messages,
+      details: {
+        Servidor: interaction.guild.name,
+        Canal: `#${interaction.channel.name}`,
+        Autor: await tagOf(closed.user_id),
+        Atendente: closed.claimed_by ? await tagOf(closed.claimed_by) : 'Não reivindicado',
+        'Fechado por': `${interaction.user.tag} (${interaction.user.id})`,
+        Aberto: `${closed.created_at} UTC`,
+        Fechado: `${closed.closed_at} UTC`,
+        'Tempo de atendimento': formatDuration(handlingMs),
+      },
+    });
+  } catch (err) {
+    console.error('[tickets] Falha ao gerar transcript:', err.message);
+    return null;
+  }
+}
+
 /** Botão "Fechar": registra o fechamento, gera transcript HTML, loga e pede avaliação. */
 async function handleClose(interaction, ticketId) {
   const ticket = stmts.ticketByChannel.get(interaction.channel.id);
@@ -323,11 +365,14 @@ async function handleClose(interaction, ticketId) {
     return interaction.reply({ embeds: [errorEmbed('Ticket não encontrado ou já fechado.')], flags: MessageFlags.Ephemeral });
   }
 
+  const config = getTicketConfig(interaction.guild.id);
+  const delayMs = config.behavior.deleteDelaySeconds * 1000;
+
   await interaction.reply({
     embeds: [
       baseEmbed({
         title: `${emoji(interaction.guild, 'ticket_close')} Fechando ticket`,
-        description: 'Gerando transcript e arquivando em 5 segundos...',
+        description: `Arquivando este canal em ${config.behavior.deleteDelaySeconds} segundo(s)...`,
         color: colors.warning,
       }),
     ],
@@ -341,28 +386,11 @@ async function handleClose(interaction, ticketId) {
   const handlingMs = durationBetween(closed.claimed_at ?? closed.created_at, closed.closed_at);
   const totalMs = durationBetween(closed.created_at, closed.closed_at);
 
-  let transcript = null;
-  try {
-    const messages = await fetchChannelHistory(interaction.channel);
-    transcript = buildHtmlTranscript({
-      ticket: closed,
-      messages,
-      details: {
-        Servidor: interaction.guild.name,
-        Canal: `#${interaction.channel.name}`,
-        Autor: `${(await interaction.client.users.fetch(closed.user_id).catch(() => null))?.tag ?? closed.user_id} (${closed.user_id})`,
-        Atendente: closed.claimed_by
-          ? `${(await interaction.client.users.fetch(closed.claimed_by).catch(() => null))?.tag ?? closed.claimed_by} (${closed.claimed_by})`
-          : 'Não reivindicado',
-        'Fechado por': `${interaction.user.tag} (${interaction.user.id})`,
-        Aberto: `${closed.created_at} UTC`,
-        Fechado: `${closed.closed_at} UTC`,
-        'Tempo de atendimento': formatDuration(handlingMs),
-      },
-    });
-  } catch (err) {
-    console.error('[tickets] Falha ao gerar transcript:', err.message);
-  }
+  // Ler o histórico inteiro do canal é a parte cara do fechamento; sem
+  // transcript, ela nem começa.
+  const transcript = config.behavior.createTranscript
+    ? await buildTranscriptFile(interaction, closed, handlingMs)
+    : null;
 
   const logChannel = await resolveTicketLogChannel(interaction.guild);
   if (logChannel) {
@@ -389,7 +417,7 @@ async function handleClose(interaction, ticketId) {
   }
 
   // Avaliação só faz sentido quando há um atendente responsável.
-  if (closed.claimed_by) {
+  if (config.behavior.sendRatingDm && closed.claimed_by) {
     const author = await interaction.client.users.fetch(closed.user_id).catch(() => null);
     await author
       ?.send(buildRatingRequest(closed, interaction.guild))
@@ -398,7 +426,7 @@ async function handleClose(interaction, ticketId) {
 
   setTimeout(() => {
     interaction.channel.delete(`Ticket #${closed.id} fechado por ${interaction.user.tag}`).catch(() => {});
-  }, 5000);
+  }, delayMs);
 }
 
 /** Clique numa estrela na DM → abre o modal de comentário opcional. */

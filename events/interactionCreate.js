@@ -2,6 +2,7 @@ const { Events, MessageFlags } = require('discord.js');
 const { routeTicketInteraction } = require('../handlers/ticketHandler');
 const { handleEntryButton } = require('../handlers/giveawayHandler');
 const { handleStatsPagination } = require('../handlers/ticketStatsHandler');
+const { routeTicketSetup } = require('../handlers/ticketSetupHandler');
 const { routeEmbedInteraction } = require('../handlers/embedHandler');
 const { routeWelcomeSetup } = require('../handlers/welcomeSetupHandler');
 const { routeBotStatus } = require('../handlers/botStatusHandler');
@@ -80,6 +81,11 @@ module.exports = {
       // showModal na avaliação — nenhum dos dois admite deferReply antes).
       if (customId.startsWith('ticket_')) {
         await routeTicketInteraction(interaction);
+        return;
+      }
+      // Painel do /ticket-config: abre modais e gerencia o próprio ack.
+      if (customId.startsWith('tsetup_')) {
+        await routeTicketSetup(interaction);
         return;
       }
       // Paginação do /ticket-stats: edita a própria mensagem, sem defer.

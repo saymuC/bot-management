@@ -83,7 +83,6 @@ function normalizeTicketConfig(raw) {
     maxOpenPerUser: clampInt(source.maxOpenPerUser, LIMITS.maxOpenPerUser, DEFAULTS.maxOpenPerUser),
     logChannelId: normalizeId(source.logChannelId),
     defaultParentCategoryId: normalizeId(source.defaultParentCategoryId),
-    closedParentCategoryId: normalizeId(source.closedParentCategoryId),
     panel: {
       channelId,
       // Mensagem sem canal é referência órfã: republicar precisa dos dois, e
