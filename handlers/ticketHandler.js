@@ -18,6 +18,7 @@ const { colors } = require('../config/settings');
 const { emoji } = require('../utils/emojis');
 const { getTicketConfig, resolveTicketLogChannelId } = require('../utils/tickets/config');
 const { buildTicketPanelComponents } = require('../utils/tickets/panel');
+const { isTicketStaff, isTicketManager } = require('../utils/tickets/permissions');
 
 const stmts = {
   categories: db.prepare('SELECT * FROM ticket_categories WHERE guild_id = ?'),
@@ -28,9 +29,19 @@ const stmts = {
   insertTicket: db.prepare(
     'INSERT INTO tickets (guild_id, channel_id, user_id, category_label) VALUES (?, ?, ?, ?)'
   ),
-  ticketByChannel: db.prepare("SELECT * FROM tickets WHERE channel_id = ? AND status = 'open'"),
+  // `user_closed` também está vivo: o canal continua no servidor e a equipe
+  // ainda decide entre reabrir e encerrar.
+  ticketByChannel: db.prepare(
+    "SELECT * FROM tickets WHERE channel_id = ? AND status IN ('open', 'user_closed')"
+  ),
   ticketById: db.prepare('SELECT * FROM tickets WHERE id = ?'),
   claim: db.prepare('UPDATE tickets SET claimed_by = ?, claimed_at = CURRENT_TIMESTAMP WHERE id = ?'),
+  softClose: db.prepare(
+    "UPDATE tickets SET status = 'user_closed', user_closed_at = CURRENT_TIMESTAMP WHERE id = ?"
+  ),
+  reopen: db.prepare(
+    "UPDATE tickets SET status = 'open', user_closed_at = NULL, reopened_at = CURRENT_TIMESTAMP WHERE id = ?"
+  ),
   close: db.prepare(
     "UPDATE tickets SET status = 'closed', closed_by = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?"
   ),
@@ -240,23 +251,41 @@ async function handleCategorySelect(interaction) {
   });
 }
 
-/** Botão "Reivindicar" — exclusivo da equipe, o autor do ticket não pode assumir. */
-async function handleClaim(interaction, ticketId) {
+/** Recusa curta e efêmera — o canal do ticket não precisa do registro. */
+const refuse = (interaction, text) =>
+  interaction.reply({ embeds: [errorEmbed(text)], flags: MessageFlags.Ephemeral });
+
+/**
+ * Ticket vivo do canal, ou `null` (já respondendo a recusa).
+ *
+ * O id vem do `customId` do botão, que fica no canal para sempre: conferir
+ * contra o ticket do canal impede que um botão de um ticket antigo, ainda
+ * clicável numa mensagem antiga, atue no ticket atual.
+ */
+async function loadTicket(interaction, ticketId) {
   const ticket = stmts.ticketByChannel.get(interaction.channel.id);
   if (!ticket || ticket.id !== Number(ticketId)) {
-    return interaction.reply({ embeds: [errorEmbed('Ticket não encontrado ou já fechado.')], flags: MessageFlags.Ephemeral });
+    await refuse(interaction, 'Ticket não encontrado ou já encerrado.');
+    return null;
   }
+  return ticket;
+}
+
+/** Botão "Reivindicar" — exclusivo da equipe, o autor do ticket não pode assumir. */
+async function handleClaim(interaction, ticketId) {
+  const ticket = await loadTicket(interaction, ticketId);
+  if (!ticket) return undefined;
+
+  const config = getTicketConfig(interaction.guild.id);
+  if (!isTicketStaff(interaction.member, config)) {
+    return refuse(interaction, 'Só a equipe de atendimento pode reivindicar tickets.');
+  }
+  // Vale também para quem é da equipe: autoatendimento falsearia as estatísticas.
   if (ticket.user_id === interaction.user.id) {
-    return interaction.reply({
-      embeds: [errorEmbed('Você abriu este ticket, então não pode reivindicá-lo. Aguarde um atendente da equipe.')],
-      flags: MessageFlags.Ephemeral,
-    });
+    return refuse(interaction, 'Você abriu este ticket, então não pode reivindicá-lo.');
   }
   if (ticket.claimed_by) {
-    return interaction.reply({
-      embeds: [errorEmbed(`Este ticket já foi reivindicado por <@${ticket.claimed_by}>.`)],
-      flags: MessageFlags.Ephemeral,
-    });
+    return refuse(interaction, `Este ticket já foi reivindicado por <@${ticket.claimed_by}>.`);
   }
 
   stmts.claim.run(interaction.user.id, ticket.id);
@@ -358,14 +387,201 @@ async function buildTranscriptFile(interaction, closed, handlingMs) {
   }
 }
 
-/** Botão "Fechar": registra o fechamento, gera transcript HTML, loga e pede avaliação. */
-async function handleClose(interaction, ticketId) {
-  const ticket = stmts.ticketByChannel.get(interaction.channel.id);
-  if (!ticket || ticket.id !== Number(ticketId)) {
-    return interaction.reply({ embeds: [errorEmbed('Ticket não encontrado ou já fechado.')], flags: MessageFlags.Ephemeral });
-  }
+/** Permissões que o autor tem no canal do próprio ticket. */
+const AUTHOR_ALLOW = [
+  PermissionFlagsBits.ViewChannel,
+  PermissionFlagsBits.SendMessages,
+  PermissionFlagsBits.ReadMessageHistory,
+  PermissionFlagsBits.AttachFiles,
+];
+
+/**
+ * O autor fecha o próprio lado: sai do canal, que continua vivo para a equipe.
+ *
+ * Não é o fim do ticket — sem isto, um usuário impaciente apagaria o canal (e o
+ * transcript) antes de a equipe ler o caso. A equipe decide entre reabrir e
+ * encerrar de vez.
+ */
+async function handleSoftClose(interaction, ticket, config) {
+  stmts.softClose.run(ticket.id);
+
+  // Efêmero: em um instante ele deixa de ver o canal, e uma resposta pública
+  // ali não chegaria a ele.
+  await interaction.reply({
+    embeds: [
+      successEmbed(
+        'Você encerrou o seu lado do atendimento e saiu do canal.\n' +
+          'A equipe ainda pode revisar o caso e reabrir o ticket se precisar falar com você.',
+        `${emoji(interaction.guild, 'ticket_close')} Ticket fechado`
+      ),
+    ],
+    flags: MessageFlags.Ephemeral,
+  });
+
+  await interaction.channel.permissionOverwrites
+    .delete(ticket.user_id, `Ticket #${ticket.id} fechado pelo autor`)
+    .catch((err) => console.error('[tickets] Falha ao remover o autor do canal:', err.message));
+
+  const actions = new ActionRowBuilder().addComponents(
+    [
+      config.behavior.allowReopen
+        ? new ButtonBuilder()
+            .setCustomId(`ticket_reopen_${ticket.id}`)
+            .setLabel('Reabrir')
+            .setEmoji('🔓')
+            .setStyle(ButtonStyle.Success)
+        : null,
+      new ButtonBuilder()
+        .setCustomId(`ticket_close_${ticket.id}`)
+        .setLabel('Encerrar e apagar')
+        .setEmoji(emoji(interaction.guild, 'ticket_close'))
+        .setStyle(ButtonStyle.Danger),
+    ].filter(Boolean)
+  );
+
+  await interaction.channel
+    .send({
+      embeds: [
+        baseEmbed({
+          title: `${emoji(interaction.guild, 'ticket_close')} O autor encerrou o atendimento`,
+          description:
+            `<@${ticket.user_id}> fechou o próprio lado do ticket **#${ticket.id}** e não vê mais este canal.\n` +
+            'O canal continua aqui para a equipe: **reabra** para voltar a falar com o autor ou ' +
+            '**encerre** para gerar o transcript e apagar o canal.',
+          color: colors.warning,
+        }),
+      ],
+      components: [actions],
+      allowedMentions: { parse: [] },
+    })
+    .catch((err) => console.error('[tickets] Falha ao avisar o fechamento pelo autor:', err.message));
+
+  const logChannel = await resolveTicketLogChannel(interaction.guild);
+  await logChannel
+    ?.send({
+      embeds: [
+        baseEmbed({
+          title: `${emoji(interaction.guild, 'ticket_close')} Ticket fechado pelo autor`,
+          description: `Ticket **#${ticket.id}** (**${ticket.category_label}**) em ${interaction.channel}.`,
+          color: colors.warning,
+          fields: [
+            { name: 'Autor', value: `<@${ticket.user_id}>`, inline: true },
+            {
+              name: 'Atendente',
+              value: ticket.claimed_by ? `<@${ticket.claimed_by}>` : 'Não reivindicado',
+              inline: true,
+            },
+            {
+              name: 'Tempo aberto',
+              value: formatDuration(Date.now() - (parseSqlDate(ticket.created_at)?.getTime() ?? Date.now())),
+              inline: true,
+            },
+          ],
+        }),
+      ],
+      allowedMentions: { parse: [] },
+    })
+    .catch((err) => console.error('[tickets] Falha ao logar fechamento pelo autor:', err.message));
+
+  return undefined;
+}
+
+/** Botão "Reabrir": devolve o autor ao canal de um ticket que ele havia fechado. */
+async function handleReopen(interaction, ticketId) {
+  const ticket = await loadTicket(interaction, ticketId);
+  if (!ticket) return undefined;
 
   const config = getTicketConfig(interaction.guild.id);
+  if (!isTicketStaff(interaction.member, config)) {
+    return refuse(interaction, 'Só a equipe de atendimento pode reabrir tickets.');
+  }
+  if (ticket.status !== 'user_closed') {
+    return refuse(interaction, 'Este ticket já está aberto.');
+  }
+  // O botão sobrevive ao desligamento da reabertura na configuração.
+  if (!config.behavior.allowReopen) {
+    return refuse(interaction, 'A reabertura de tickets está desativada neste servidor.');
+  }
+
+  try {
+    await interaction.channel.permissionOverwrites.edit(
+      ticket.user_id,
+      Object.fromEntries(AUTHOR_ALLOW.map((flag) => [flag, true])),
+      { reason: `Ticket #${ticket.id} reaberto por ${interaction.user.tag}` }
+    );
+  } catch (err) {
+    // Sem o autor de volta no canal, reabrir não significa nada: o banco fica
+    // como está e a equipe vê o motivo.
+    console.error('[tickets] Falha ao devolver o autor ao canal:', err.message);
+    return refuse(interaction, 'Não consegui devolver o autor ao canal. Verifique minhas permissões aqui.');
+  }
+
+  stmts.reopen.run(ticket.id);
+
+  await interaction.reply({
+    content: `<@${ticket.user_id}>`,
+    embeds: [
+      successEmbed(
+        `${interaction.user} reabriu este ticket. <@${ticket.user_id}> voltou ao canal e pode responder.`,
+        '🔓 Ticket reaberto'
+      ),
+    ],
+  });
+
+  const logChannel = await resolveTicketLogChannel(interaction.guild);
+  await logChannel
+    ?.send({
+      embeds: [
+        baseEmbed({
+          title: '🔓 Ticket reaberto',
+          description: `Ticket **#${ticket.id}** (**${ticket.category_label}**) em ${interaction.channel}.`,
+          color: colors.info,
+          fields: [
+            { name: 'Reaberto por', value: `${interaction.user}`, inline: true },
+            { name: 'Autor', value: `<@${ticket.user_id}>`, inline: true },
+          ],
+        }),
+      ],
+      allowedMentions: { parse: [] },
+    })
+    .catch((err) => console.error('[tickets] Falha ao logar reabertura:', err.message));
+
+  return undefined;
+}
+
+/**
+ * Botão "Fechar" — decide pelo clicante.
+ *
+ * O mesmo `customId` serve o autor e a equipe porque as mensagens de ticket já
+ * publicadas nos canais continuam válidas: quem abriu fecha o próprio lado, a
+ * gerência encerra de vez, gera transcript, pede avaliação e apaga o canal.
+ */
+async function handleClose(interaction, ticketId) {
+  const ticket = await loadTicket(interaction, ticketId);
+  if (!ticket) return undefined;
+
+  const config = getTicketConfig(interaction.guild.id);
+
+  if (!isTicketManager(interaction.member, config)) {
+    if (ticket.user_id !== interaction.user.id) {
+      return refuse(interaction, 'Encerrar e apagar um ticket é restrito à gerência.');
+    }
+    if (!config.permissions.allowUserSoftClose) {
+      return refuse(interaction, 'Só a equipe pode fechar este ticket. Aguarde o atendimento.');
+    }
+    if (ticket.status === 'user_closed') {
+      return refuse(interaction, 'Você já fechou o seu lado deste atendimento.');
+    }
+    return handleSoftClose(interaction, ticket, config);
+  }
+
+  if (config.permissions.requireClaimBeforeFinalClose && !ticket.claimed_by) {
+    return refuse(
+      interaction,
+      'Este ticket precisa ser reivindicado antes de ser encerrado — clique em **Reivindicar** primeiro.'
+    );
+  }
+
   const delayMs = config.behavior.deleteDelaySeconds * 1000;
 
   await interaction.reply({
@@ -530,6 +746,7 @@ async function routeTicketInteraction(interaction) {
   if (customId === 'ticket_select_category') return handleCategorySelect(interaction);
   if (customId.startsWith('ticket_claim_')) return handleClaim(interaction, customId.slice('ticket_claim_'.length));
   if (customId.startsWith('ticket_close_')) return handleClose(interaction, customId.slice('ticket_close_'.length));
+  if (customId.startsWith('ticket_reopen_')) return handleReopen(interaction, customId.slice('ticket_reopen_'.length));
   if (customId.startsWith('ticket_ratemodal_')) return handleRatingModal(interaction, customId.slice('ticket_ratemodal_'.length));
   if (customId.startsWith('ticket_rate_')) return handleRatingButton(interaction, customId.slice('ticket_rate_'.length));
   return null;

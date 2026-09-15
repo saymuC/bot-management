@@ -74,11 +74,14 @@ CREATE TABLE IF NOT EXISTS tickets (
   channel_id TEXT,
   user_id TEXT NOT NULL,
   category_label TEXT,
+  -- open | user_closed (o autor encerrou o lado dele) | closed
   status TEXT DEFAULT 'open',
   claimed_by TEXT,
   claimed_at TEXT,
   closed_by TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  user_closed_at TEXT,
+  reopened_at TEXT,
   closed_at TEXT
 );
 
@@ -191,6 +194,8 @@ ensureColumn('guild_config', 'levels_config', 'TEXT');
 ensureColumn('guild_config', 'ticket_config', 'TEXT');
 ensureColumn('tickets', 'claimed_at', 'TEXT');
 ensureColumn('tickets', 'closed_by', 'TEXT');
+ensureColumn('tickets', 'user_closed_at', 'TEXT');
+ensureColumn('tickets', 'reopened_at', 'TEXT');
 ensureColumn('giveaways', 'cancelled', 'INTEGER DEFAULT 0');
 ensureColumn('giveaways', 'cancelled_by', 'TEXT');
 
