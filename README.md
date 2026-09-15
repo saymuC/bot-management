@@ -70,9 +70,7 @@ São 39 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 
 | Comando | O que faz | Permissão |
 |---|---|---|
-| `/ticket-panel canal titulo descricao` | Publica o painel de abertura de tickets | Administrador |
-| `/ticket-add-category label emoji categoria cargo` | Adiciona uma categoria de ticket | Administrador |
-| `/ticket-remove-category id` | Remove uma categoria de ticket | Administrador |
+| `/ticket-config` | Painel dos tickets: categorias, painel público, permissões, comportamento e logs | Administrador |
 | `/ticket-stats pagina` | Ranking dos atendentes: nota média, tickets e TMA | Gerenciar mensagens |
 
 ### Sorteios
@@ -121,7 +119,7 @@ São 39 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 | `/automod` | Painel do AutoMod: filtros, limites, punições, isenções e escada | Administrador |
 | `/setup-welcome` | Painel das mensagens de boas-vindas | Administrador |
 | `/setup-logs canal` | Define o canal de logs do servidor | Administrador |
-| `/setup-ticket-logs canal` | Canal de logs exclusivo dos tickets (transcripts e avaliações) | Administrador |
+| `/ticket-config` | Painel dos tickets — inclui o canal de logs exclusivo (transcripts e avaliações) | Administrador |
 | `/setup-verify` | Painel da verificação por captcha: canal, cargo e aparência do embed e do botão | Administrador |
 | `/pull-user usuario` | Readiciona ao servidor quem conectou a conta via OAuth | Administrador |
 | `/bot-status` | Painel do status e da atividade do bot (global) | Administrador |
@@ -404,14 +402,15 @@ Para agir antes do prazo, `/giveaway-end` e `/giveaway-stop` têm autocomplete: 
 
 ## Fluxo de tickets
 
-1. `/ticket-add-category label:"Bug" emoji:🐛 categoria:#Tickets cargo:@Suporte` (repita para cada tipo).
-2. `/setup-ticket-logs canal:#logs-tickets` define onde ficam os registros e transcripts. Sem isso, tudo cai no canal de `/setup-logs`.
-3. `/ticket-panel canal:#suporte` publica o painel com o botão **Abrir Ticket**.
-4. No clique em **Abrir Ticket** o bot já valida o limite de tickets abertos por usuário (`config/settings.js` → `ticket.maxOpenPerUser`), antes de mostrar as categorias.
-5. O usuário escolhe a categoria no dropdown → o bot cria o canal privado com botões **Reivindicar** e **Fechar**.
-6. **Reivindicar** é só para a equipe: quem abriu o ticket não pode assumir o próprio atendimento.
-7. Ao fechar, o bot registra no canal de logs quem reivindicou, quem fechou, a espera até o primeiro atendimento, o tempo de atendimento e a duração total, junto do **transcript em HTML** (tema escuro, com avatares, embeds e anexos).
-8. Em seguida o autor recebe uma DM pedindo a avaliação: 5 botões de ⭐. Ao clicar, abre um formulário com um comentário opcional. A nota fica creditada ao atendente que reivindicou o ticket.
+Tudo é configurado em `/ticket-config`, num painel só seu: **Categorias** (uma por tipo de atendimento, com a categoria do Discord e o cargo de suporte), **Painel público** (canal, textos, cor e o botão **Abrir Ticket**), **Permissões** (cargos de atendimento e de gerência), **Comportamento** (limite por usuário, transcript, avaliação, reabertura) e **Logs**. Cada alteração é salva na hora — não existe botão "salvar" — e o próprio painel avisa o que está salvo mas não funciona (cargo apagado, categoria que não existe mais, bot sem **Gerenciar Canais**).
+
+1. Em **Painel público**, escolha o canal e clique em **Publicar**. Republicar no mesmo canal **edita** a mensagem já publicada em vez de empilhar painéis.
+2. No clique em **Abrir Ticket** o bot valida o limite de tickets abertos por usuário antes de mostrar as categorias, e recusa se o sistema estiver desativado.
+3. O usuário escolhe a categoria no dropdown → o bot cria o canal privado com botões **Reivindicar** e **Fechar**.
+4. **Reivindicar** é só para a equipe: quem abriu o ticket não pode assumir o próprio atendimento.
+5. **Fechar** tem dois lados. O autor encerra **o lado dele**: perde o acesso ao canal, mas o atendimento continua para a equipe, que vê **Reabrir** e **Encerrar e apagar**. Já a gerência encerra de verdade — o canal é apagado depois do prazo configurado, e o transcript no log é a cópia que fica.
+6. No encerramento definitivo o bot registra no canal de logs quem reivindicou, quem fechou, a espera até o primeiro atendimento, o tempo de atendimento e a duração total, junto do **transcript em HTML** (tema escuro, com avatares, embeds e anexos).
+7. Em seguida o autor recebe uma DM pedindo a avaliação: 5 botões de ⭐. Ao clicar, abre um formulário com um comentário opcional. A nota fica creditada ao atendente que reivindicou o ticket.
 
 ### KPIs de atendimento
 

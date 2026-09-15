@@ -17,7 +17,6 @@ const { durationBetween, formatDuration, parseSqlDate } = require('../utils/time
 const { colors } = require('../config/settings');
 const { emoji } = require('../utils/emojis');
 const { getTicketConfig, resolveTicketLogChannelId } = require('../utils/tickets/config');
-const { buildTicketPanelComponents } = require('../utils/tickets/panel');
 const { isTicketStaff, isTicketManager } = require('../utils/tickets/permissions');
 
 const stmts = {
@@ -58,14 +57,6 @@ const STAR_LABELS = {
   4: 'Bom',
   5: 'Excelente',
 };
-
-/**
- * Botão inicial do painel de tickets, com o rótulo e o emoji configurados.
- * @param {import('discord.js').Guild} guild dono do painel
- */
-function buildPanelComponents(guild) {
-  return buildTicketPanelComponents(guild, getTicketConfig(guild.id));
-}
 
 /**
  * Canal de logs de tickets. Cai no canal de logs geral quando o específico
@@ -752,4 +743,4 @@ async function routeTicketInteraction(interaction) {
   return null;
 }
 
-module.exports = { buildPanelComponents, routeTicketInteraction, STAR_LABELS };
+module.exports = { routeTicketInteraction, STAR_LABELS };

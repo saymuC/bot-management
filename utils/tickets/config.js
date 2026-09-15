@@ -121,8 +121,9 @@ function normalizeTicketConfig(raw) {
 /**
  * Config equivalente às colunas antigas de `guild_config`.
  *
- * Serve os servidores configurados pelos comandos separados (`/ticket-panel`,
- * `/setup-ticket-logs`) antes de existir `ticket_config`. A conversão acontece
+ * Serve os servidores configurados pelos comandos separados que existiam antes
+ * do painel (`/ticket-panel`, `/setup-ticket-logs`, já removidos): eles
+ * gravavam só estas colunas. A conversão acontece
  * na leitura e não é persistida: gravar aqui transformaria toda leitura de um
  * servidor sem tickets numa escrita no banco.
  *
