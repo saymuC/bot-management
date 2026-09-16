@@ -36,7 +36,7 @@ const {
 let desiredRaw = null;
 /** Última presença resolvida (placeholders substituídos) aplicada de fato. */
 let lastApplied = null;
-let started = false;
+const startedClients = new WeakSet();
 
 function reassert(client, reason) {
   if (!desiredRaw || !client.user) return;
@@ -56,9 +56,9 @@ function reassert(client, reason) {
 
 /** Troca a presença mantida pelo guardião e aplica na hora. */
 function setDesiredPresence(client, presence) {
+  if (!client.user) return null;
   // Guardamos o valor bruto (com placeholders) para permitir resolução dinâmica.
   desiredRaw = normalizePresence(presence);
-  if (!client.user) return null;
   // Aplica já resolvendo para feedback imediato
   const resolved = resolvePresenceTemplates(client, desiredRaw);
   applyPresence(client, resolved);
@@ -74,8 +74,8 @@ function startPresenceKeeper(client) {
   desiredRaw = getSavedPresence();
   reassert(client, 'boot');
 
-  if (started) return;
-  started = true;
+  if (startedClients.has(client)) return;
+  startedClients.add(client);
 
   client.on(Events.ShardReady, () => reassert(client, 'shard reconectado'));
   client.on(Events.ShardResume, () => reassert(client, 'shard retomado'));

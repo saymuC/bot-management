@@ -179,7 +179,8 @@ function htmlPage(title, body) {
 
 /** Inicia o servidor HTTP do callback OAuth. Chamar apenas se CLIENT_SECRET estiver definido. */
 function startOAuthServer(client) {
-  const port = Number(process.env.OAUTH_PORT || 3000);
+  const rawPort = process.env.OAUTH_PORT;
+  const port = rawPort === '0' ? 0 : Number(rawPort || 3000);
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`);
@@ -192,13 +193,15 @@ function startOAuthServer(client) {
       const code = url.searchParams.get('code');
       const state = url.searchParams.get('state');
       const pending = pendingStates.get(state);
-      pendingStates.delete(state);
 
       if (!code || !pending || pending.expires < Date.now()) {
+        if (pending) pendingStates.delete(state);
         res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(htmlPage('Link inválido ou expirado', 'Volte ao Discord e clique no botão de verificação novamente.'));
         return;
       }
+
+      pendingStates.delete(state);
 
       const token = await exchangeCode(code);
       const user = await fetchOAuthUser(token.access_token);
@@ -230,7 +233,8 @@ function startOAuthServer(client) {
     }
   });
 
-  server.listen(port, () => console.log(`[oauth] Servidor de callback OAuth em http://localhost:${port}/callback`));
+  server.on('error', (err) => console.error('[oauth] Servidor de callback falhou:', err.message));
+  if (rawPort !== '0') server.listen(port, () => console.log(`[oauth] Servidor de callback OAuth em http://localhost:${port}/callback`));
   return server;
 }
 
@@ -243,4 +247,4 @@ const isOAuthEnabled = () =>
   Boolean(process.env.CLIENT_SECRET && process.env.OAUTH_REDIRECT_URI && process.env.CLIENT_ID) &&
   hasEncryptionKey();
 
-module.exports = { startOAuthServer, createOAuthUrl, addUserToGuild, revokeAuthorization, isOAuthEnabled };
+module.exports = { startOAuthServer, createOAuthUrl, addUserToGuild, revokeAuthorization, isOAuthEnabled, pendingStates };
