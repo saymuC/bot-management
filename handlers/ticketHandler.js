@@ -24,26 +24,31 @@ const stmts = {
   categories: db.prepare('SELECT * FROM ticket_categories WHERE guild_id = ?'),
   categoryById: db.prepare('SELECT * FROM ticket_categories WHERE id = ? AND guild_id = ?'),
   openCount: db.prepare(
-    "SELECT COUNT(*) AS n FROM tickets WHERE guild_id = ? AND user_id = ? AND status = 'open'"
+    "SELECT COUNT(*) AS n FROM tickets WHERE guild_id = ? AND user_id = ? AND status IN ('open', 'user_closed')"
+  ),
+  activeByCategory: db.prepare(
+    "SELECT * FROM tickets WHERE guild_id = ? AND user_id = ? AND category_label = ? AND status IN ('open', 'user_closed')"
   ),
   insertTicket: db.prepare(
     'INSERT INTO tickets (guild_id, channel_id, user_id, category_label) VALUES (?, ?, ?, ?)'
   ),
+  attachChannel: db.prepare('UPDATE tickets SET channel_id = ? WHERE id = ?'),
+  deleteTicket: db.prepare('DELETE FROM tickets WHERE id = ?'),
   // `user_closed` também está vivo: o canal continua no servidor e a equipe
   // ainda decide entre reabrir e encerrar.
   ticketByChannel: db.prepare(
     "SELECT * FROM tickets WHERE channel_id = ? AND status IN ('open', 'user_closed')"
   ),
   ticketById: db.prepare('SELECT * FROM tickets WHERE id = ?'),
-  claim: db.prepare('UPDATE tickets SET claimed_by = ?, claimed_at = CURRENT_TIMESTAMP WHERE id = ?'),
+  claim: db.prepare("UPDATE tickets SET claimed_by = ?, claimed_at = CURRENT_TIMESTAMP WHERE id = ? AND claimed_by IS NULL AND status = 'open'"),
   softClose: db.prepare(
-    "UPDATE tickets SET status = 'user_closed', user_closed_at = CURRENT_TIMESTAMP WHERE id = ?"
+    "UPDATE tickets SET status = 'user_closed', user_closed_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'open'"
   ),
   reopen: db.prepare(
-    "UPDATE tickets SET status = 'open', user_closed_at = NULL, reopened_at = CURRENT_TIMESTAMP WHERE id = ?"
+    "UPDATE tickets SET status = 'open', user_closed_at = NULL, reopened_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'user_closed'"
   ),
   close: db.prepare(
-    "UPDATE tickets SET status = 'closed', closed_by = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ?"
+    "UPDATE tickets SET status = 'closed', closed_by = ?, closed_at = CURRENT_TIMESTAMP WHERE id = ? AND status IN ('open', 'user_closed')"
   ),
   ratingByTicket: db.prepare('SELECT * FROM ticket_ratings WHERE ticket_id = ?'),
   insertRating: db.prepare(
@@ -158,6 +163,27 @@ async function handleCategorySelect(interaction) {
   await interaction.deferUpdate();
 
   const config = getTicketConfig(interaction.guild.id);
+  const existing = stmts.activeByCategory.get(interaction.guild.id, interaction.user.id, category.label);
+  if (existing) {
+    return interaction.editReply({
+      embeds: [errorEmbed(`Você já tem um ticket ativo nesta categoria: <#${existing.channel_id}>.`)],
+      components: [],
+    });
+  }
+
+  const ticketId = db.transaction(() => {
+    const current = stmts.activeByCategory.get(interaction.guild.id, interaction.user.id, category.label);
+    if (current) return null;
+    return stmts.insertTicket.run(interaction.guild.id, null, interaction.user.id, category.label).lastInsertRowid;
+  })();
+
+  if (!ticketId) {
+    return interaction.editReply({
+      embeds: [errorEmbed('Você já tem um ticket ativo nesta categoria.')],
+      components: [],
+    });
+  }
+
   const parentId = category.target_category_id || config.defaultParentCategoryId || null;
 
   // O cargo da categoria e os cargos gerais de atendimento entram no mesmo
@@ -198,6 +224,7 @@ async function handleCategorySelect(interaction) {
       permissionOverwrites: overwrites,
     });
   } catch (err) {
+    stmts.deleteTicket.run(ticketId);
     console.error('[tickets] Falha ao criar canal:', err);
     return interaction.editReply({
       embeds: [errorEmbed('Não consegui criar o canal do ticket. Verifique minhas permissões e a categoria configurada.')],
@@ -205,10 +232,7 @@ async function handleCategorySelect(interaction) {
     });
   }
 
-  const result = stmts.insertTicket.run(
-    interaction.guild.id, channel.id, interaction.user.id, category.label
-  );
-  const ticketId = result.lastInsertRowid;
+  stmts.attachChannel.run(channel.id, ticketId);
 
   const buttons = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -741,7 +765,10 @@ async function handleClaim(interaction, ticketId) {
     return refuse(interaction, `Este ticket já foi reivindicado por <@${ticket.claimed_by}>.`);
   }
 
-  stmts.claim.run(interaction.user.id, ticket.id);
+  if (!stmts.claim.run(interaction.user.id, ticket.id).changes) {
+    const current = stmts.ticketById.get(ticket.id);
+    return refuse(interaction, current?.claimed_by ? `Este ticket já foi reivindicado por <@${current.claimed_by}>.` : 'Ticket não encontrado ou já encerrado.');
+  }
 
   const claimIcon = emoji(interaction.guild, 'ticket_claim');
   await interaction.reply({
@@ -856,7 +883,9 @@ const AUTHOR_ALLOW = [
  * encerrar de vez.
  */
 async function handleSoftClose(interaction, ticket, config) {
-  stmts.softClose.run(ticket.id);
+  if (!stmts.softClose.run(ticket.id).changes) {
+    return refuse(interaction, 'Você já fechou o seu lado deste atendimento.');
+  }
 
   // Efêmero: em um instante ele deixa de ver o canal, e uma resposta pública
   // ali não chegaria a ele.
@@ -969,7 +998,9 @@ async function handleReopen(interaction, ticketId) {
     return refuse(interaction, 'Não consegui devolver o autor ao canal. Verifique minhas permissões aqui.');
   }
 
-  stmts.reopen.run(ticket.id);
+  if (!stmts.reopen.run(ticket.id).changes) {
+    return refuse(interaction, 'Este ticket já está aberto.');
+  }
 
   await interaction.reply({
     content: `<@${ticket.user_id}>`,
@@ -1047,7 +1078,9 @@ async function handleClose(interaction, ticketId) {
     ],
   });
 
-  stmts.close.run(interaction.user.id, ticket.id);
+  if (!stmts.close.run(interaction.user.id, ticket.id).changes) {
+    return refuse(interaction, 'Ticket não encontrado ou já encerrado.');
+  }
   const closed = stmts.ticketById.get(ticket.id);
 
   // KPIs: espera até o primeiro atendimento e duração efetiva do atendimento.
@@ -1093,7 +1126,7 @@ async function handleClose(interaction, ticketId) {
       .catch(() => console.log(`[tickets] DM de avaliação bloqueada pelo usuário ${closed.user_id}.`));
   }
 
-  setTimeout(() => {
+  const deleteTimer = setTimeout(() => {
     interaction.channel.delete(`Ticket #${closed.id} fechado por ${interaction.user.tag}`).catch(() => {});
     // Apaga calls privadas criadas para este ticket.
     const created = activeTicketCalls.get(closed.id) ?? [];
@@ -1111,6 +1144,7 @@ async function handleClose(interaction, ticketId) {
       for (const [, ch] of maybe) ch.delete(`Call do ticket #${closed.id} encerrado`).catch(() => {});
     }
   }, delayMs);
+  deleteTimer.unref?.();
 }
 
 /** Clique numa estrela na DM → abre o modal de comentário opcional. */
