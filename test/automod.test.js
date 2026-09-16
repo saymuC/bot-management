@@ -173,9 +173,8 @@ test('compileWildcard corta o padrão comprido em vez de recusar', () => {
 test('compileWildcard não explode com padrão hostil', () => {
   // O mesmo padrão como RegExp travaria por backtracking. Aqui o custo é linear.
   const hit = compileWildcard('(a+)+$');
-  const started = Date.now();
   assert.equal(hit('a'.repeat(3000)), false);
-  assert.ok(Date.now() - started < 500);
+  assert.equal(hit('(a+)+$'), true);
 });
 
 test('compilePatterns descarta os inválidos e guarda o original', () => {

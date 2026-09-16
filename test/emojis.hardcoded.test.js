@@ -5,8 +5,8 @@
  * alguém escrever de volta um dos emojis padrão do registro num deles — que é
  * exatamente como a configuração por servidor deixa de valer sem ninguém notar.
  *
- * Só os arquivos listados. Painéis de setup, cards em canvas (emoji personalizado
- * não desenha) e o transcript HTML ficam fora de propósito.
+ * Painéis de setup, cards em canvas (emoji personalizado não desenha) e o
+ * transcript HTML ficam fora de propósito.
  */
 
 const test = require('node:test');
@@ -16,27 +16,29 @@ const path = require('node:path');
 
 const { DEFAULT_EMOJIS } = require('../utils/emojis');
 
-const WIRED = [
-  'handlers/verifyHandler.js',
-  'handlers/levelsHandler.js',
-  'handlers/levelsLeaderboardHandler.js',
-  'handlers/giveawayHandler.js',
-  'handlers/ticketStatsHandler.js',
-  'utils/levels/adminAction.js',
-  'utils/automod/enforce.js',
-  'utils/automod/raid.js',
-  'commands/moderation/infractions.js',
-  'commands/moderation/warnings.js',
-  'commands/levels/rank.js',
-];
+const ROOT = path.join(__dirname, '..');
+const SKIP = /(?:^|[\\/])(?:test|node_modules|database)(?:[\\/])|Setup|ConfigHandler|config\.js|panel\.js|card|transcript\.js|emojis\.js/;
 
 /** Comentário pode citar emoji à vontade; o que conta é o código. */
 const stripComments = (source) =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
+function jsFiles(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return jsFiles(full);
+    return entry.isFile() && entry.name.endsWith('.js') ? [full] : [];
+  });
+}
+
+const WIRED = jsFiles(ROOT)
+  .filter((file) => !SKIP.test(path.relative(ROOT, file)))
+  .filter((file) => fs.readFileSync(file, 'utf8').includes('emoji('));
+
 for (const file of WIRED) {
-  test(`${file} não tem emoji fixo do registro`, () => {
-    const code = stripComments(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'));
+  const rel = path.relative(ROOT, file).replaceAll(path.sep, '/');
+  test(`${rel} não tem emoji fixo do registro`, () => {
+    const code = stripComments(fs.readFileSync(file, 'utf8'));
 
     const found = Object.entries(DEFAULT_EMOJIS)
       .filter(([, value]) => code.includes(value))
