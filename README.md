@@ -51,7 +51,7 @@ npm test
 
 ## Comandos
 
-São 39 comandos. A coluna **Permissão** é a exigência padrão do Discord para o membro ver e usar o comando (dá para sobrescrever em _Configurações do servidor → Integrações_).
+São 40 comandos. A coluna **Permissão** é a exigência padrão do Discord para o membro ver e usar o comando (dá para sobrescrever em _Configurações do servidor → Integrações_).
 
 ### Moderação
 
@@ -116,6 +116,7 @@ São 39 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 
 | Comando | O que faz | Permissão |
 |---|---|---|
+| `/config` | Central de configuração: abre verificação, logs, tickets, AutoMod, boas-vindas e níveis em um menu | Administrador |
 | `/automod` | Painel do AutoMod: filtros, limites, punições, isenções e escada | Administrador |
 | `/setup-welcome` | Painel das mensagens de boas-vindas | Administrador |
 | `/setup-logs canal` | Define o canal de logs do servidor | Administrador |
@@ -125,6 +126,8 @@ São 39 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 | `/bot-status` | Painel do status e da atividade do bot (global) | Administrador |
 | `/config-emojis` | Painel para trocar os emojis usados pelo bot | Administrador |
 | `/emoji-add emoji arquivo nome` | Importa um emoji de outro servidor, de um ID ou de uma imagem | Gerenciar expressões |
+
+`/config` não substitui os comandos antigos: ele é só uma entrada rápida com dropdown. Ao escolher **Verificar membros**, **Sistema de tickets**, **Proteção automática**, **Mensagem de boas-vindas** ou **Sistema de níveis**, o bot edita a mesma resposta efêmera e abre o painel atual daquele sistema. Em **Configurar logs**, ele mostra um seletor de canal de texto e salva o canal geral de logs na hora.
 
 `/nuke confirmar:true` clona o canal atual (nome, tópico, NSFW, slowmode, categoria, posição e todas as permissões), apaga o original e registra a ação nos logs. É irreversível: as mensagens não são recuperáveis.
 
