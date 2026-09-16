@@ -162,7 +162,6 @@ CREATE TABLE IF NOT EXISTS reaction_roles (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tickets_guild_user ON tickets (guild_id, user_id, status);
-CREATE INDEX IF NOT EXISTS idx_tickets_claimed ON tickets (guild_id, claimed_by);
 CREATE INDEX IF NOT EXISTS idx_ticket_ratings_agent ON ticket_ratings (guild_id, agent_id);
 CREATE INDEX IF NOT EXISTS idx_warns_guild_user ON warns (guild_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_automod_infractions_user ON automod_infractions (guild_id, user_id, created_at);
@@ -185,19 +184,26 @@ function ensureColumn(table, column, definition) {
   console.log(`[db] Migração: ${table}.${column} adicionada.`);
 }
 
-ensureColumn('guild_config', 'ticket_log_channel_id', 'TEXT');
-ensureColumn('guild_config', 'welcome_config', 'TEXT');
-ensureColumn('guild_config', 'emoji_config', 'TEXT');
-ensureColumn('guild_config', 'verify_panel', 'TEXT');
-ensureColumn('guild_config', 'automod_config', 'TEXT');
-ensureColumn('guild_config', 'levels_config', 'TEXT');
-ensureColumn('guild_config', 'ticket_config', 'TEXT');
+// campos permitidos — nunca interpolar entrada do usuário aqui
+const CONFIG_FIELDS = [
+  'welcome_channel_id', 'welcome_message', 'welcome_config', 'emoji_config', 'log_channel_id',
+  'ticket_category_id', 'ticket_panel_channel_id', 'ticket_log_channel_id', 'ticket_config',
+  'verify_channel_id', 'verify_role_id', 'verify_panel', 'automod_config', 'levels_config',
+  'autorole_id', 'mute_role_id',
+];
+
+for (const column of CONFIG_FIELDS) ensureColumn('guild_config', column, 'TEXT');
+ensureColumn('tickets', 'claimed_by', 'TEXT');
+ensureColumn('tickets', 'created_at', 'TEXT DEFAULT CURRENT_TIMESTAMP');
 ensureColumn('tickets', 'claimed_at', 'TEXT');
 ensureColumn('tickets', 'closed_by', 'TEXT');
+ensureColumn('tickets', 'closed_at', 'TEXT');
 ensureColumn('tickets', 'user_closed_at', 'TEXT');
 ensureColumn('tickets', 'reopened_at', 'TEXT');
 ensureColumn('giveaways', 'cancelled', 'INTEGER DEFAULT 0');
 ensureColumn('giveaways', 'cancelled_by', 'TEXT');
+
+db.exec('CREATE INDEX IF NOT EXISTS idx_tickets_claimed ON tickets (guild_id, claimed_by)');
 
 // ---- guild_config ----
 const upsertConfigField = (field) =>
@@ -206,13 +212,6 @@ const upsertConfigField = (field) =>
      ON CONFLICT(guild_id) DO UPDATE SET ${field} = excluded.${field}`
   );
 
-// campos permitidos — nunca interpolar entrada do usuário aqui
-const CONFIG_FIELDS = [
-  'welcome_channel_id', 'welcome_message', 'welcome_config', 'emoji_config', 'log_channel_id',
-  'ticket_category_id', 'ticket_panel_channel_id', 'ticket_log_channel_id', 'ticket_config',
-  'verify_channel_id', 'verify_role_id', 'verify_panel', 'automod_config', 'levels_config',
-  'autorole_id', 'mute_role_id',
-];
 const configSetters = Object.fromEntries(CONFIG_FIELDS.map((f) => [f, upsertConfigField(f)]));
 
 function setGuildConfig(guildId, field, value) {

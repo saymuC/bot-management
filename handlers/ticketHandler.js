@@ -666,7 +666,7 @@ async function handleAdminTransfer(interaction, ticketId) {
     ?.send({
       embeds: [
         baseEmbed({
-          title: '🔁 Transferência de atendimento',
+          title: `${emoji(interaction.guild, 'ticket_admin_transfer')} Transferência de atendimento`,
           description: `Ticket **#${updated.id}** (${updated.category_label ?? 'sem categoria'}) transferido.`,
           color: colors.info,
           fields: [

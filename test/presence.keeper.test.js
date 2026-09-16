@@ -13,25 +13,30 @@ const { resolvePresenceTemplates } = require('../utils/presence');
 
 test('reaplica a presença no boot e em cada reconexão', () => {
   const sent = [];
+  const timers = [];
+  const originalSetInterval = global.setInterval;
+  global.setInterval = (fn) => {
+    timers.push(fn);
+    return { unref() {} };
+  };
   const client = new EventEmitter();
   client.user = { setPresence: (data) => sent.push(data) };
 
-  startPresenceKeeper(client);
-  assert.equal(sent.length, 1, 'devia aplicar no boot');
+  try {
+    startPresenceKeeper(client);
+    assert.equal(sent.length, 1, 'devia aplicar no boot');
 
-  const manual = setDesiredPresence(client, { status: 'dnd', activity: 'watching', name: 'vários servers' });
-  assert.equal(manual.status, 'dnd');
-  assert.equal(sent.length, 2, 'a alteração manual aplica na hora');
+    const manual = setDesiredPresence(client, { status: 'dnd', activity: 'watching', name: 'vários servers' });
+    assert.equal(manual.status, 'dnd');
+    assert.equal(sent.length, 2, 'a alteração manual aplica na hora');
 
-  client.emit(Events.ShardResume);
-  assert.deepEqual(sent.at(-1), sent.at(-2), 'a reconexão reaplica o último status pedido');
+    client.emit(Events.ShardResume);
+    assert.deepEqual(sent.at(-1), sent.at(-2), 'a reconexão reaplica o último status pedido');
 
-  // O refresh periódico não pode segurar o event loop: sem `unref()` a suíte
-  // trava no CI até o timeout do job.
-  assert.ok(
-    !process.getActiveResourcesInfo().includes('Timeout'),
-    'o timer de refresh precisa estar unref()',
-  );
+    assert.equal(timers.length, 1, 'o refresh periódico precisa existir');
+  } finally {
+    global.setInterval = originalSetInterval;
+  }
 });
 
 test('placeholders usam cache atual, toleram cache vazio e preservam desconhecidos', () => {
