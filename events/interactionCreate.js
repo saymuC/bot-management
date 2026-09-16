@@ -11,6 +11,7 @@ const { routeVerifyInteraction } = require('../handlers/verifyHandler');
 const { routeVerifySetup } = require('../handlers/verifySetupHandler');
 const { routeAutomodSetup } = require('../handlers/automodSetupHandler');
 const { routeLevelsSetup } = require('../handlers/levelsSetupHandler');
+const { routeConfigCenter } = require('../handlers/configCenterHandler');
 const { handleTopPagination } = require('../handlers/levelsLeaderboardHandler');
 const { db } = require('../database/db');
 const { errorEmbed, successEmbed } = require('../utils/embeds');
@@ -112,6 +113,11 @@ module.exports = {
       // responde depois pelo editReply, então cuida do próprio ack.
       if (customId.startsWith('cfgemoji_')) {
         await routeEmojiConfig(interaction);
+        return;
+      }
+      // Central do /config: só escolhe o painel existente ou salva o canal geral de logs.
+      if (customId.startsWith('config_')) {
+        await routeConfigCenter(interaction);
         return;
       }
       // Painel do /automod: selects, modais de limites e escada — próprio ack.
