@@ -18,7 +18,7 @@ const { durationBetween, formatDuration, parseSqlDate } = require('../utils/time
 const { colors } = require('../config/settings');
 const { emoji } = require('../utils/emojis');
 const { getTicketConfig, resolveTicketLogChannelId } = require('../utils/tickets/config');
-const { isTicketStaff, isTicketManager } = require('../utils/tickets/permissions');
+const { ticketStaffRoleIds, isTicketStaff, isTicketManager } = require('../utils/tickets/permissions');
 
 const stmts = {
   categories: db.prepare('SELECT * FROM ticket_categories WHERE guild_id = ?'),
@@ -172,10 +172,25 @@ async function handleCategorySelect(interaction) {
   }
 
   const ticketId = db.transaction(() => {
+    const openCount = stmts.openCount.get(interaction.guild.id, interaction.user.id).n;
+    if (openCount >= config.maxOpenPerUser) return 'limit';
     const current = stmts.activeByCategory.get(interaction.guild.id, interaction.user.id, category.label);
     if (current) return null;
     return stmts.insertTicket.run(interaction.guild.id, null, interaction.user.id, category.label).lastInsertRowid;
   })();
+
+  if (ticketId === 'limit') {
+    const openCount = stmts.openCount.get(interaction.guild.id, interaction.user.id).n;
+    return interaction.editReply({
+      embeds: [
+        errorEmbed(
+          `Você já tem **${openCount}** ticket(s) aberto(s), o máximo permitido é **${config.maxOpenPerUser}**.\n` +
+            'Feche um dos tickets em andamento antes de abrir outro.'
+        ),
+      ],
+      components: [],
+    });
+  }
 
   if (!ticketId) {
     return interaction.editReply({
@@ -186,11 +201,8 @@ async function handleCategorySelect(interaction) {
 
   const parentId = category.target_category_id || config.defaultParentCategoryId || null;
 
-  // O cargo da categoria e os cargos gerais de atendimento entram no mesmo
-  // conjunto: id repetido em dois overwrites é recusado pelo Discord.
-  const staffRoleIds = [
-    ...new Set([category.support_role_id, ...config.permissions.staffRoleIds].filter(Boolean)),
-  ];
+  // Usa o mesmo conjunto do gate lógico: suporte, atendimento e gerência.
+  const staffRoleIds = ticketStaffRoleIds(interaction.guild.id, config);
 
   const overwrites = [
     { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
@@ -460,10 +472,7 @@ async function handleAdminSelect(interaction, ticketId) {
 
   if (action === 'create_call') {
     // Tenta criar um canal de voz privado para o ticket.
-    const categoryRoleId = findCategorySupportRoleId(interaction.guild.id, ticket.category_label);
-    const staffRoleIds = [
-      ...new Set([...(categoryRoleId ? [categoryRoleId] : []), ...config.permissions.staffRoleIds].filter(Boolean)),
-    ];
+    const staffRoleIds = ticketStaffRoleIds(interaction.guild.id, config);
     const overwrites = [
       { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect] },
       { id: ticket.user_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak] },
@@ -1068,6 +1077,11 @@ async function handleClose(interaction, ticketId) {
 
   const delayMs = config.behavior.deleteDelaySeconds * 1000;
 
+  if (!stmts.close.run(interaction.user.id, ticket.id).changes) {
+    return refuse(interaction, 'Ticket não encontrado ou já encerrado.');
+  }
+  const closed = stmts.ticketById.get(ticket.id);
+
   await interaction.reply({
     embeds: [
       baseEmbed({
@@ -1077,11 +1091,6 @@ async function handleClose(interaction, ticketId) {
       }),
     ],
   });
-
-  if (!stmts.close.run(interaction.user.id, ticket.id).changes) {
-    return refuse(interaction, 'Ticket não encontrado ou já encerrado.');
-  }
-  const closed = stmts.ticketById.get(ticket.id);
 
   // KPIs: espera até o primeiro atendimento e duração efetiva do atendimento.
   const waitMs = durationBetween(closed.created_at, closed.claimed_at);

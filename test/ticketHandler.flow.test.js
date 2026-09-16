@@ -13,6 +13,7 @@ const USER = '900000000000000002';
 const STAFF = '900000000000000003';
 const OTHER = '900000000000000004';
 const STAFF_ROLE = '900000000000000010';
+const MANAGER_ROLE = '900000000000000011';
 const LOG = '900000000000000020';
 
 function cleanup() {
@@ -25,12 +26,12 @@ function cleanup() {
 test.beforeEach(cleanup);
 test.after(cleanup);
 
-function seed({ maxOpenPerUser = 1, allowUserSoftClose = true, deleteDelaySeconds = 300 } = {}) {
+function seed({ maxOpenPerUser = 1, allowUserSoftClose = true, deleteDelaySeconds = 300, managerRoleIds = [] } = {}) {
   saveTicketConfig(GUILD, {
     enabled: true,
     maxOpenPerUser,
     logChannelId: LOG,
-    permissions: { staffRoleIds: [STAFF_ROLE], allowUserSoftClose },
+    permissions: { staffRoleIds: [STAFF_ROLE], managerRoleIds, allowUserSoftClose },
     behavior: { deleteDelaySeconds, createTranscript: true, sendRatingDm: true, allowReopen: true },
   });
   return db.prepare('INSERT INTO ticket_categories (guild_id, label, support_role_id) VALUES (?, ?, ?)').run(GUILD, 'Suporte', STAFF_ROLE).lastInsertRowid;
@@ -54,6 +55,7 @@ function makeGuild({ createFails = false, memberRoles = {} } = {}) {
       create: async (data) => {
         if (createFails) throw new Error('Missing Permissions');
         const channel = makeChannel(`chan-${created.length + 1}`, guild, data.name);
+        channel.createData = data;
         created.push(channel);
         guild.channels.cache.set(channel.id, channel);
         return channel;
@@ -115,9 +117,9 @@ function interaction(customId, guild, channel, userId = USER, roles = [], extra 
   };
 }
 
-function insertTicket({ channelId = 'chan-existing', userId = USER, status = 'open', claimedBy = null } = {}) {
+function insertTicket({ channelId = 'chan-existing', userId = USER, status = 'open', claimedBy = null, categoryLabel = 'Suporte' } = {}) {
   const id = db.prepare('INSERT INTO tickets (guild_id, channel_id, user_id, category_label, status, claimed_by) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(GUILD, channelId, userId, 'Suporte', status, claimedBy).lastInsertRowid;
+    .run(GUILD, channelId, userId, categoryLabel, status, claimedBy).lastInsertRowid;
   return db.prepare('SELECT * FROM tickets WHERE id = ?').get(id);
 }
 
@@ -143,6 +145,41 @@ test('user_closed ainda conta como ticket ativo no botão abrir', async () => {
 
   assert.equal(i.calls[0][0], 'reply');
   assert.match(i.calls[0][1].embeds[0].data.description, /máximo permitido/);
+});
+
+test('gerência entra nos overwrites do ticket e da call', async () => {
+  const categoryId = seed({ managerRoleIds: [MANAGER_ROLE] });
+  const guild = makeGuild();
+  const open = interaction('ticket_select_category', guild, null, USER, [], { values: [String(categoryId)] });
+
+  await routeTicketInteraction(open);
+
+  const ticketOverwrites = guild.created[0].createData.permissionOverwrites.map((o) => o.id);
+  assert.ok(ticketOverwrites.includes(STAFF_ROLE));
+  assert.ok(ticketOverwrites.includes(MANAGER_ROLE));
+
+  const ticket = db.prepare('SELECT * FROM tickets WHERE guild_id = ?').get(GUILD);
+  const call = interaction(`ticket_admin_select_${ticket.id}`, guild, guild.created[0], STAFF, [MANAGER_ROLE], {
+    values: ['create_call'],
+  });
+
+  await routeTicketInteraction(call);
+
+  const callOverwrites = guild.created[1].createData.permissionOverwrites.map((o) => o.id);
+  assert.ok(callOverwrites.includes(STAFF_ROLE));
+  assert.ok(callOverwrites.includes(MANAGER_ROLE));
+});
+
+test('limite de tickets é revalidado ao selecionar categoria', async () => {
+  const categoryId = seed({ maxOpenPerUser: 1 });
+  const guild = makeGuild();
+  const i = interaction('ticket_select_category', guild, null, USER, [], { values: [String(categoryId)] });
+  insertTicket({ status: 'user_closed', categoryLabel: 'Financeiro' });
+
+  await routeTicketInteraction(i);
+
+  assert.equal(guild.created.length, 0);
+  assert.match(i.calls.at(-1)[1].embeds[0].data.description, /máximo permitido/);
 });
 
 test('botão antigo não atua em outro ticket e permissão é revalidada no clique', async () => {
