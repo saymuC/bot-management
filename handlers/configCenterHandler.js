@@ -24,6 +24,7 @@ const { buildEmojiPanel } = require('./emojiConfigHandler');
 const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
 const { emoji } = require('../utils/emojis');
 const { makeSafeAck } = require('../utils/interactionAck');
+const { validateAssignableRole } = require('../utils/assignableRoles');
 
 const PREFIX = 'config_';
 const safeAck = makeSafeAck('config-center');
@@ -169,15 +170,6 @@ function reactionRoleChannelPayload(guild, role) {
   };
 }
 
-function roleError(role, guild) {
-  if (!role) return 'Cargo não encontrado.';
-  if (role.id === guild.roles.everyone.id || role.managed) return 'Este cargo não pode ser atribuído manualmente.';
-  if (role.position >= guild.members.me.roles.highest.position) {
-    return 'Meu cargo precisa estar acima do cargo escolhido para eu poder atribuí-lo.';
-  }
-  return null;
-}
-
 function logsPayload(guild) {
   return {
     embeds: [
@@ -223,7 +215,7 @@ function selectedPanel(interaction, selected) {
 }
 
 function saveAutorole(interaction, role) {
-  const problem = role ? roleError(role, interaction.guild) : null;
+  const problem = role ? validateAssignableRole(interaction, role) : null;
   if (problem) return { embeds: [errorEmbed(problem, undefined, interaction.guild)], components: [] };
 
   setGuildConfig(interaction.guild.id, 'autorole_id', role?.id ?? null);
@@ -234,7 +226,7 @@ function saveAutorole(interaction, role) {
 }
 
 async function publishReactionRole(interaction, role, channel) {
-  const problem = roleError(role, interaction.guild);
+  const problem = validateAssignableRole(interaction, role);
   if (problem) return { embeds: [errorEmbed(problem, undefined, interaction.guild)], components: [] };
 
   const buttonEmoji = emoji(interaction.guild, 'reaction_role');
@@ -302,7 +294,7 @@ async function routeConfigCenter(interaction) {
 
   if (action === 'rr-role') {
     const role = interaction.roles.first();
-    const problem = roleError(role, interaction.guild);
+    const problem = validateAssignableRole(interaction, role);
     return safeAck(interaction, () =>
       interaction.update(problem ? { embeds: [errorEmbed(problem, undefined, interaction.guild)], components: [] } : reactionRoleChannelPayload(interaction.guild, role))
     );

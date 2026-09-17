@@ -5,6 +5,7 @@ const { db } = require('../../database/db');
 const { baseEmbed, successEmbed, errorEmbed } = require('../../utils/embeds');
 // Alias: `emoji` já é o nome da opção do comando logo abaixo.
 const { emoji: resolveEmoji } = require('../../utils/emojis');
+const { validateAssignableRole } = require('../../utils/assignableRoles');
 
 const insertRR = db.prepare(
   'INSERT INTO reaction_roles (guild_id, message_id, emoji, role_id) VALUES (?, ?, ?, ?)'
@@ -31,16 +32,8 @@ module.exports = {
     const text = interaction.options.getString('mensagem') ?? `Clique no botão para receber/remover o cargo ${role.name}.`;
     const emoji = interaction.options.getString('emoji') ?? resolveEmoji(interaction.guild, 'reaction_role');
 
-    if (role.position >= interaction.guild.members.me.roles.highest.position) {
-      return respond(interaction, {
-        embeds: [errorEmbed('Meu cargo precisa estar acima do cargo escolhido para eu poder atribuí-lo.')],
-      });
-    }
-    if (role.managed || role.id === interaction.guild.roles.everyone.id) {
-      return respond(interaction, {
-        embeds: [errorEmbed('Este cargo não pode ser atribuído manualmente.')],
-      });
-    }
+    const problem = validateAssignableRole(interaction, role);
+    if (problem) return respond(interaction, { embeds: [errorEmbed(problem)] });
 
     // insere primeiro para obter o id usado no customId, depois grava o message_id
     const result = insertRR.run(interaction.guild.id, 'pending', emoji, role.id);

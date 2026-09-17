@@ -45,6 +45,7 @@ const { MAX_LEVEL } = require('../utils/levels/formula');
 const { getLevelsConfig, saveLevelsConfig, normalizeIds, normalizeHexColor } = require('../utils/levels/config');
 const { renderAppearancePreview } = require('../utils/levels/card/preview');
 const { roleBlockReason, syncMemberRewards } = require('../utils/levels/rewards');
+const { validateAssignableRole } = require('../utils/assignableRoles');
 const { resetUserXp } = require('../utils/levels/service');
 const { logEvent } = require('../utils/logger');
 const { colors } = require('../config/settings');
@@ -920,6 +921,11 @@ function submitReward(interaction, config) {
   if (!roleIds.length) {
     return showView(interaction, config, 'rewards', '⚠️ Nenhum cargo reconhecido. Cole a menção do cargo ou o ID dele.');
   }
+  const blockedByUser = roleIds
+    .map((id) => interaction.guild.roles.cache.get(id))
+    .map((role) => validateAssignableRole(interaction, role))
+    .filter(Boolean);
+  if (blockedByUser.length) return showView(interaction, config, 'rewards', `⚠️ ${blockedByUser.join(' · ')}`);
 
   // O normalizador mescla níveis repetidos, então adicionar sobre um nível que já
   // existe soma os cargos em vez de sobrescrever — que é a leitura de "editar".

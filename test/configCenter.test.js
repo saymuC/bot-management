@@ -8,15 +8,25 @@ const { centerPayload, routeConfigCenter } = require('../handlers/configCenterHa
 const GUILD = '900000000000000000';
 const LOG_CHANNEL = '900000000000000001';
 const ROLE_ID = '900000000000000003';
+const ADMIN_ROLE_ID = '900000000000000004';
 
 function fakeGuild() {
   const channel = { id: LOG_CHANNEL, name: 'logs', toString: () => `<#${LOG_CHANNEL}>` };
-  const role = { id: ROLE_ID, name: 'Membro', position: 1, managed: false, toString: () => `<@&${ROLE_ID}>` };
+  const role = { id: ROLE_ID, name: 'Membro', position: 1, managed: false, permissions: { has: () => false }, toString: () => `<@&${ROLE_ID}>` };
+  const adminRole = {
+    id: ADMIN_ROLE_ID,
+    name: 'Admin',
+    position: 80,
+    managed: false,
+    permissions: { has: (permission) => permission === PermissionFlagsBits.Administrator },
+    toString: () => `<@&${ADMIN_ROLE_ID}>`,
+  };
   return {
     id: GUILD,
+    ownerId: '900000000000000099',
     name: 'Servidor de Teste',
     channels: { cache: new Collection([[channel.id, channel]]) },
-    roles: { everyone: { id: GUILD }, cache: new Collection([[role.id, role]]) },
+    roles: { everyone: { id: GUILD }, cache: new Collection([[role.id, role], [adminRole.id, adminRole]]) },
     emojis: { cache: new Collection() },
     members: { me: { roles: { highest: { position: 100 } }, permissions: { has: () => true } } },
   };
@@ -24,9 +34,10 @@ function fakeGuild() {
 
 function fakeMember(guild) {
   return {
+    id: '900000000000000002',
     guild,
     permissions: { has: () => false },
-    roles: { cache: new Collection() },
+    roles: { cache: new Collection(), highest: { position: 50 } },
     displayName: 'Admin',
     user: { id: '900000000000000002', username: 'Admin', displayAvatarURL: () => 'https://example.com/avatar.png' },
   };
@@ -125,6 +136,26 @@ test('selecionar cargo do reaction role pede canal', async () => {
   assert.equal(i.calls[0].method, 'update');
   assert.match(i.calls[0].payload.embeds[0].data.description, /Agora selecione o canal/);
   assert.equal(rows(i.calls[0].payload)[0].components[0].custom_id, `config_rr-channel:${ROLE_ID}`);
+});
+
+test('autorole recusa cargo administrativo', async () => {
+  const role = fakeGuild().roles.cache.get(ADMIN_ROLE_ID);
+  const i = interaction({ customId: 'config_autorole-role', roles: [role] });
+
+  await routeConfigCenter(i);
+
+  assert.notEqual(getGuildConfig(GUILD)?.autorole_id, ADMIN_ROLE_ID);
+  assert.match(i.calls[0].payload.embeds[0].data.description, /abaixo do seu cargo mais alto|permissões administrativas/);
+});
+
+test('reaction role recusa cargo acima do executor', async () => {
+  const role = fakeGuild().roles.cache.get(ADMIN_ROLE_ID);
+  role.permissions = { has: () => false };
+  const i = interaction({ customId: 'config_rr-role', roles: [role] });
+
+  await routeConfigCenter(i);
+
+  assert.match(i.calls[0].payload.embeds[0].data.description, /abaixo do seu cargo mais alto/);
 });
 
 test('selecionar canal de logs salva na hora e limpa componentes', async () => {
