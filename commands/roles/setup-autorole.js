@@ -2,6 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { respond } = require('../../utils/interactions');
 const { setGuildConfig } = require('../../database/db');
 const { successEmbed, errorEmbed } = require('../../utils/embeds');
+const { validateAssignableRole } = require('../../utils/assignableRoles');
 
 module.exports = {
   ephemeral: true,
@@ -20,11 +21,8 @@ module.exports = {
       return respond(interaction, { embeds: [successEmbed('Autorole desativado.')] });
     }
 
-    if (role.position >= interaction.guild.members.me.roles.highest.position || role.managed) {
-      return respond(interaction, {
-        embeds: [errorEmbed('Não consigo atribuir este cargo (hierarquia ou cargo gerenciado).')],
-      });
-    }
+    const problem = validateAssignableRole(interaction, role);
+    if (problem) return respond(interaction, { embeds: [errorEmbed(problem)] });
 
     setGuildConfig(interaction.guild.id, 'autorole_id', role.id);
     return respond(interaction, {

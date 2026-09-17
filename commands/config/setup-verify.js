@@ -4,6 +4,7 @@ const { setGuildConfig } = require('../../database/db');
 const { canPostEmbed, POST_EMBED_PERMS_LABEL } = require('../../utils/channelPerms');
 const { getVerifyPanelConfig } = require('../../utils/verifyPanelConfig');
 const { buildSetupPayload } = require('../../handlers/verifySetupHandler');
+const { validateAssignableRole } = require('../../utils/assignableRoles');
 
 module.exports = {
   ephemeral: true,
@@ -41,10 +42,9 @@ module.exports = {
     }
 
     if (role) {
-      if (role.id === interaction.guild.id) {
-        notices.push('⚠️ Ignorei o cargo: o `@everyone` não serve como cargo de verificado.');
-      } else if (role.managed || role.position >= interaction.guild.members.me.roles.highest.position) {
-        notices.push(`⚠️ Ignorei ${role}: o cargo do bot precisa estar acima dele e ele não pode ser de integração.`);
+      const problem = validateAssignableRole(interaction, role);
+      if (problem) {
+        notices.push(`⚠️ Ignorei ${role}: ${problem}`);
       } else {
         setGuildConfig(interaction.guild.id, 'verify_role_id', role.id);
       }

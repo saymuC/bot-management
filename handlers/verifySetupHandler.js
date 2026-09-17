@@ -42,6 +42,7 @@ const { isHttpUrl } = require('../utils/media');
 const { parseEmojiInput } = require('../utils/emojis');
 const { checkCaptchaSupport } = require('../utils/captcha');
 const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
+const { validateAssignableRole } = require('../utils/assignableRoles');
 const { POST_EMBED_PERMS_LABEL, TEXT_CHANNEL_TYPES, canPostEmbed } = require('../utils/channelPerms');
 const { buildVerifyPanel } = require('./verifyHandler');
 const {
@@ -67,16 +68,6 @@ function readTargets(guild) {
   const channel = row?.verify_channel_id ? guild.channels.cache.get(row.verify_channel_id) ?? null : null;
   const role = row?.verify_role_id ? guild.roles.cache.get(row.verify_role_id) ?? null : null;
   return { channelId: row?.verify_channel_id ?? null, roleId: row?.verify_role_id ?? null, channel, role };
-}
-
-/** O bot só consegue entregar cargo abaixo do próprio e não gerenciado por integração. */
-function roleProblem(guild, role) {
-  if (role.id === guild.id) return 'O `@everyone` não serve como cargo de verificado.';
-  if (role.managed) return `${role} é gerenciado por uma integração — o Discord não deixa o bot atribuí-lo.`;
-  if (role.position >= guild.members.me.roles.highest.position) {
-    return `${role} está acima do cargo do bot na hierarquia. Suba o cargo do bot para poder entregá-lo.`;
-  }
-  return null;
 }
 
 /** Placeholder de select não renderiza markdown: os backticks sairiam literais. */
@@ -231,7 +222,7 @@ function handleRoleSelect(interaction, config) {
   const role = interaction.roles.first();
   if (!role) return undefined;
 
-  const problem = roleProblem(interaction.guild, role);
+  const problem = validateAssignableRole(interaction, role);
   if (problem) return refresh(interaction, config, `⚠️ ${problem}`);
 
   setGuildConfig(interaction.guild.id, 'verify_role_id', role.id);
@@ -465,7 +456,7 @@ async function handlePublish(interaction, config) {
 
   const role = interaction.guild.roles.cache.get(roleId);
   if (!role) return redraw(config, '⚠️ O cargo configurado não existe mais. Escolha outro.');
-  const problem = roleProblem(interaction.guild, role);
+  const problem = validateAssignableRole(interaction, role);
   if (problem) return redraw(config, `⚠️ ${problem}`);
 
   const channel = await interaction.guild.channels.fetch(channelId).catch(() => null);

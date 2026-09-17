@@ -16,6 +16,7 @@
  */
 
 const { PermissionFlagsBits } = require('discord.js');
+const { roleBlockReason } = require('../assignableRoles');
 
 /**
  * Todos os cargos que este sistema gerencia neste servidor.
@@ -65,26 +66,6 @@ function reconcile(desired, managed, current) {
     // tirar um cargo que não foi ele que deu.
     toRemove: [...has].filter((roleId) => managed.has(roleId) && !desired.has(roleId)),
   };
-}
-
-/**
- * Por que o bot não pode mexer neste cargo, ou null quando pode.
- * @param {import('discord.js').Guild} guild
- * @param {string} roleId
- * @returns {string|null}
- */
-function roleBlockReason(guild, roleId) {
-  const role = guild.roles.cache.get(roleId);
-  if (!role) return `<@&${roleId}> não existe mais`;
-  // Cargo de integração (bot, booster) não pode ser atribuído por ninguém.
-  if (role.managed) return `${role.name} é gerenciado por uma integração`;
-  if (role.id === guild.id) return '@everyone não pode ser recompensa';
-
-  const me = guild.members.me;
-  if (me && role.position >= me.roles.highest.position) {
-    return `${role.name} está acima do bot na hierarquia`;
-  }
-  return null;
 }
 
 /**
