@@ -1,23 +1,22 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { respond } = require('../../utils/interactions');
 const { centerPayload } = require('../../handlers/configCenterHandler');
-const { errorEmbed } = require('../../utils/embeds');
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'config',
+  requiredPermission: PermissionFlagsBits.Administrator,
   data: new SlashCommandBuilder()
     .setName('config')
     .setDescription('Configure os principais sistemas do servidor')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .setDMPermission(false),
 
   async execute(interaction) {
-    if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
-      return respond(interaction, {
-        embeds: [errorEmbed('Você precisa ser administrador para usar este comando.', undefined, interaction.guild)],
-      });
-    }
-
+    // Sem checagem própria aqui de propósito: o gate de events/interactionCreate.js
+    // já decidiu, e repetir "precisa ser Administrator" trancaria justamente o
+    // cargo que o painel de permissões acabou de autorizar.
     return respond(interaction, centerPayload(interaction.guild));
   },
 };

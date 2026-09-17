@@ -5,10 +5,13 @@ const { MAX_LEVEL } = require('../../utils/levels/formula');
 
 module.exports = {
   ephemeral: false,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'levels',
+  requiredPermission: PermissionFlagsBits.ManageGuild,
   data: new SlashCommandBuilder()
     .setName('set-level')
     .setDescription('Define o nível de um membro (o XP passa para o mínimo desse nível)')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .setDMPermission(false)
     .addUserOption((opt) => opt.setName('usuario').setDescription('Membro a ajustar').setRequired(true))
     .addIntegerOption((opt) =>

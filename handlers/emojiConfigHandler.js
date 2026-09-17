@@ -17,7 +17,6 @@ const {
   ButtonStyle,
   StringSelectMenuBuilder,
   MessageFlags,
-  PermissionFlagsBits,
 } = require('discord.js');
 
 const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
@@ -39,6 +38,7 @@ const {
   emoji,
 } = require('../utils/emojis');
 const { makeSafeAck } = require('../utils/interactionAck');
+const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
 
 const PREFIX = 'cfgemoji_';
 
@@ -348,7 +348,7 @@ function handleClose(interaction) {
 }
 
 function isAllowed(interaction) {
-  return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
+  return canUseCommand(interaction, 'config-emojis');
 }
 
 /** Roteia as interações do painel (`cfgemoji_*`). */
@@ -357,7 +357,7 @@ async function routeEmojiConfig(interaction) {
   if (!isAllowed(interaction)) {
     return safeAck(interaction, () =>
       interaction.reply({
-        embeds: [errorEmbed('Você precisa ser administrador para alterar os emojis do bot.')],
+        embeds: [errorEmbed(PERMISSION_DENIED_MESSAGE)],
         flags: MessageFlags.Ephemeral,
       })
     );

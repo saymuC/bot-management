@@ -8,10 +8,13 @@ const { validateAssignableRole } = require('../../utils/assignableRoles');
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'config',
+  requiredPermission: PermissionFlagsBits.Administrator,
   data: new SlashCommandBuilder()
     .setName('setup-verify')
     .setDescription('Painel de configuração da verificação por captcha')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .setDMPermission(false)
     // Opcionais: são só um atalho para já chegar no painel com canal/cargo
     // preenchidos. Toda a configuração (inclusive estes dois) é feita no painel.

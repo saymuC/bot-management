@@ -32,7 +32,6 @@ const {
   TextInputBuilder,
   TextInputStyle,
   MessageFlags,
-  PermissionFlagsBits,
 } = require('discord.js');
 
 const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
@@ -45,6 +44,7 @@ const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
 const { validateAssignableRole } = require('../utils/assignableRoles');
 const { POST_EMBED_PERMS_LABEL, TEXT_CHANNEL_TYPES, canPostEmbed } = require('../utils/channelPerms');
 const { buildVerifyPanel } = require('./verifyHandler');
+const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
 const {
   BUTTON_STYLES,
   NO_EMOJI,
@@ -513,10 +513,10 @@ function handleClose(interaction) {
 
 /** Roteia as interações do painel (`vsetup_*`). */
 async function routeVerifySetup(interaction) {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+  if (!canUseCommand(interaction, 'setup-verify')) {
     return safeAck(interaction, () =>
       interaction.reply({
-        embeds: [errorEmbed('Apenas administradores podem alterar a verificação.')],
+        embeds: [errorEmbed(PERMISSION_DENIED_MESSAGE)],
         flags: MessageFlags.Ephemeral,
       })
     );

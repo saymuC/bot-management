@@ -5,10 +5,13 @@ const { successEmbed } = require('../../utils/embeds');
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'config',
+  requiredPermission: PermissionFlagsBits.Administrator,
   data: new SlashCommandBuilder()
     .setName('setup-logs')
     .setDescription('Define o canal de logs do servidor')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .setDMPermission(false)
     .addChannelOption((opt) =>
       opt.setName('canal').setDescription('Canal de logs').setRequired(true).addChannelTypes(ChannelType.GuildText)

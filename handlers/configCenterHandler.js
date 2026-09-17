@@ -5,7 +5,6 @@ const {
   ChannelSelectMenuBuilder,
   ChannelType,
   MessageFlags,
-  PermissionFlagsBits,
   RoleSelectMenuBuilder,
   StringSelectMenuBuilder,
 } = require('discord.js');
@@ -21,10 +20,12 @@ const { buildPanelPayload: welcomePanelPayload } = require('./welcomeSetupHandle
 const { getLevelsConfig } = require('../utils/levels/config');
 const { buildPanelPayload: levelsPanelPayload } = require('./levelsSetupHandler');
 const { buildEmojiPanel } = require('./emojiConfigHandler');
+const { homePayload: permissionsHomePayload } = require('./permissionsSetupHandler');
 const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
 const { emoji } = require('../utils/emojis');
 const { makeSafeAck } = require('../utils/interactionAck');
 const { validateAssignableRole } = require('../utils/assignableRoles');
+const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
 
 const PREFIX = 'config_';
 const safeAck = makeSafeAck('config-center');
@@ -95,6 +96,12 @@ function centerPayload(guild) {
               value: 'autorole',
               emoji: emoji(guild, 'autorole'),
               description: 'Cargo recebido por novos membros',
+            },
+            {
+              label: 'Permissões de comandos',
+              value: 'permissions',
+              emoji: emoji(guild, 'config_permissions'),
+              description: 'Quais cargos podem usar cada comando',
             },
             {
               label: 'Reaction role',
@@ -207,6 +214,8 @@ function selectedPanel(interaction, selected) {
       return buildEmojiPanel(interaction.guild);
     case 'autorole':
       return autorolePayload(interaction.guild);
+    case 'permissions':
+      return permissionsHomePayload(interaction.guild);
     case 'reactionrole':
       return reactionRolePayload(interaction.guild);
     default:
@@ -251,10 +260,10 @@ async function publishReactionRole(interaction, role, channel) {
 }
 
 async function routeConfigCenter(interaction) {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+  if (!canUseCommand(interaction, 'config')) {
     return safeAck(interaction, () =>
       interaction.reply({
-        embeds: [errorEmbed('Você precisa ser administrador para usar este comando.', undefined, interaction.guild)],
+        embeds: [errorEmbed(PERMISSION_DENIED_MESSAGE, undefined, interaction.guild)],
         flags: MessageFlags.Ephemeral,
       })
     );

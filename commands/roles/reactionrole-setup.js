@@ -14,10 +14,13 @@ const setMessageId = db.prepare('UPDATE reaction_roles SET message_id = ? WHERE 
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'roles',
+  requiredPermission: PermissionFlagsBits.ManageRoles,
   data: new SlashCommandBuilder()
     .setName('reactionrole-setup')
     .setDescription('Cria uma mensagem de auto-atribuição de cargo (botão toggle)')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
     .setDMPermission(false)
     .addRoleOption((opt) => opt.setName('cargo').setDescription('Cargo a atribuir/remover').setRequired(true))
     .addChannelOption((opt) =>

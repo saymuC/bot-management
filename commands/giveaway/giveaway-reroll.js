@@ -9,10 +9,13 @@ const getGiveaway = db.prepare('SELECT * FROM giveaways WHERE id = ? AND guild_i
 
 module.exports = {
   ephemeral: false,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'giveaways',
+  requiredPermission: PermissionFlagsBits.ManageGuild,
   data: new SlashCommandBuilder()
     .setName('giveaway-reroll')
     .setDescription('Sorteia novo(s) vencedor(es) de um sorteio encerrado')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .setDMPermission(false)
     .addIntegerOption((opt) => opt.setName('id').setDescription('ID do sorteio').setRequired(true))
     .addIntegerOption((opt) =>

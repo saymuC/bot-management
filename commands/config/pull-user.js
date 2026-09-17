@@ -8,10 +8,13 @@ const { emoji } = require('../../utils/emojis');
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'config',
+  requiredPermission: PermissionFlagsBits.Administrator,
   data: new SlashCommandBuilder()
     .setName('pull-user')
     .setDescription('Adiciona ao servidor um usuário que conectou a conta via verificação OAuth')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .setDMPermission(false)
     .addUserOption((opt) => opt.setName('usuario').setDescription('Usuário a adicionar').setRequired(true)),
 

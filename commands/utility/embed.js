@@ -49,10 +49,13 @@ function resolveThumbnail(attachment, urlRaw) {
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'messages',
+  requiredPermission: PermissionFlagsBits.ManageMessages,
   data: new SlashCommandBuilder()
     .setName('embed')
     .setDescription('Cria um embed personalizado com pré-visualização antes de enviar')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .setDMPermission(false)
     .addStringOption((opt) => opt.setName('titulo').setDescription('Título do embed').setRequired(true).setMaxLength(256))
     .addStringOption((opt) => opt.setName('descricao').setDescription('Descrição (use \\n para quebra de linha)').setRequired(true).setMaxLength(4000))

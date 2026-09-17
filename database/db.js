@@ -50,7 +50,10 @@ CREATE TABLE IF NOT EXISTS guild_config (
   automod_config TEXT,
   levels_config TEXT,
   autorole_id TEXT,
-  mute_role_id TEXT
+  mute_role_id TEXT,
+  -- JSON de utils/commandPermissions.js: cargos por grupo de comandos e
+  -- override por comando. NULL = servidor ainda na permissão nativa antiga.
+  command_permissions TEXT
 );
 
 -- Configuração global do bot (não é por servidor). Ex.: presença/status.
@@ -189,7 +192,7 @@ const CONFIG_FIELDS = [
   'welcome_channel_id', 'welcome_message', 'welcome_config', 'emoji_config', 'log_channel_id',
   'ticket_category_id', 'ticket_panel_channel_id', 'ticket_log_channel_id', 'ticket_config',
   'verify_channel_id', 'verify_role_id', 'verify_panel', 'automod_config', 'levels_config',
-  'autorole_id', 'mute_role_id',
+  'autorole_id', 'mute_role_id', 'command_permissions',
 ];
 
 for (const column of CONFIG_FIELDS) ensureColumn('guild_config', column, 'TEXT');

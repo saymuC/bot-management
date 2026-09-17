@@ -4,10 +4,13 @@ const { successEmbed } = require('../../utils/embeds');
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'messages',
+  requiredPermission: PermissionFlagsBits.ManageMessages,
   data: new SlashCommandBuilder()
     .setName('say')
     .setDescription('Envia uma mensagem pelo bot')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .setDMPermission(false)
     .addStringOption((opt) => opt.setName('mensagem').setDescription('Texto a enviar').setRequired(true).setMaxLength(2000))
     .addChannelOption((opt) =>

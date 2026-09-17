@@ -21,7 +21,6 @@ const {
   TextInputBuilder,
   TextInputStyle,
   MessageFlags,
-  PermissionFlagsBits,
 } = require('discord.js');
 const ms = require('ms');
 
@@ -30,6 +29,7 @@ const { TEXT_CHANNEL_TYPES } = require('../utils/channelPerms');
 const { formatDuration } = require('../utils/time');
 const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
 const { RULES, RULE_KEYS, FAMILIES, ACTIONS, NOTIFY_MODES, NOTICE_TTL_CHOICES } = require('../config/automodRules');
+const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
 const {
   MAX_POINTS,
   MAX_MUTE_MS,
@@ -775,10 +775,10 @@ const closePayload = {
 
 /** Roteia as interações do painel (`amod_*`). */
 async function routeAutomodSetup(interaction) {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+  if (!canUseCommand(interaction, 'automod')) {
     return safeAck(interaction, () =>
       interaction.reply({
-        embeds: [errorEmbed('Apenas administradores podem configurar o AutoMod.')],
+        embeds: [errorEmbed(PERMISSION_DENIED_MESSAGE)],
         flags: MessageFlags.Ephemeral,
       })
     );

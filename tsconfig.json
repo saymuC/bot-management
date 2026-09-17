@@ -20,5 +20,12 @@
     "resolveJsonModule": true,
     "skipLibCheck": true
   },
-  "include": ["config/**/*.js", "utils/levels/**/*.js", "handlers/levels*.js", "commands/levels/**/*.js"]
+  "include": [
+    "config/**/*.js",
+    "utils/levels/**/*.js",
+    "utils/commandPermissions.js",
+    "handlers/levels*.js",
+    "handlers/permissionsSetupHandler.js",
+    "commands/levels/**/*.js"
+  ]
 }
