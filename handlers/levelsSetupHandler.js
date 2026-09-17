@@ -23,7 +23,6 @@ const {
   TextInputBuilder,
   TextInputStyle,
   MessageFlags,
-  PermissionFlagsBits,
 } = require('discord.js');
 
 const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
@@ -49,6 +48,7 @@ const { validateAssignableRole } = require('../utils/assignableRoles');
 const { resetUserXp } = require('../utils/levels/service');
 const { logEvent } = require('../utils/logger');
 const { colors } = require('../config/settings');
+const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
 
 const PREFIX = 'lvl_';
 
@@ -1024,10 +1024,10 @@ async function confirmReset(interaction, config, userId) {
 
 /** Roteia as interações do painel (`lvl_*`). */
 async function routeLevelsSetup(interaction) {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
+  if (!canUseCommand(interaction, 'levelconfig')) {
     return safeAck(interaction, () =>
       interaction.reply({
-        embeds: [errorEmbed('É preciso a permissão **Gerenciar Servidor** para alterar o sistema de níveis.')],
+        embeds: [errorEmbed(PERMISSION_DENIED_MESSAGE)],
         flags: MessageFlags.Ephemeral,
       })
     );

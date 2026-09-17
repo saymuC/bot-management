@@ -5,10 +5,13 @@ const { buildPanelPayload } = require('../../handlers/levelsSetupHandler');
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'levels',
+  requiredPermission: PermissionFlagsBits.ManageGuild,
   data: new SlashCommandBuilder()
     .setName('levelconfig')
     .setDescription('Abre o painel de configuração do sistema de níveis e XP')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .setDMPermission(false),
 
   async execute(interaction) {

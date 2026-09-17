@@ -14,10 +14,13 @@ const NUKEABLE = new Set([
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'messages',
+  requiredPermission: PermissionFlagsBits.ManageChannels,
   data: new SlashCommandBuilder()
     .setName('nuke')
     .setDescription('Recria o canal atual do zero (apaga todas as mensagens)')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
     .setDMPermission(false)
     .addBooleanOption((opt) =>
       opt

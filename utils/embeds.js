@@ -2,6 +2,13 @@ const { EmbedBuilder } = require('discord.js');
 const { colors } = require('../config/settings');
 const { emoji } = require('./emojis');
 
+/**
+ * @param {{
+ *   title?: string, description?: string, color?: number, footer?: string,
+ *   thumbnail?: string, image?: string,
+ *   fields?: { name: string, value: string, inline?: boolean }[],
+ * }} [options]
+ */
 function baseEmbed({ title, description, color = colors.primary, footer, thumbnail, image, fields } = {}) {
   const embed = new EmbedBuilder().setColor(color).setTimestamp();
   if (title) embed.setTitle(title);

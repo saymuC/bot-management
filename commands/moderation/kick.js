@@ -7,10 +7,13 @@ const { emoji } = require('../../utils/emojis');
 
 module.exports = {
   ephemeral: false,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'moderation',
+  requiredPermission: PermissionFlagsBits.KickMembers,
   data: new SlashCommandBuilder()
     .setName('kick')
     .setDescription('Expulsa um membro do servidor')
-    .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
     .setDMPermission(false)
     .addUserOption((opt) => opt.setName('usuario').setDescription('Membro a expulsar').setRequired(true))
     .addStringOption((opt) => opt.setName('motivo').setDescription('Motivo da expulsão')),

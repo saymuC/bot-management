@@ -10,10 +10,13 @@ const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000; // limite do Discord: 28 dias
 
 module.exports = {
   ephemeral: false,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'moderation',
+  requiredPermission: PermissionFlagsBits.ModerateMembers,
   data: new SlashCommandBuilder()
     .setName('mute')
     .setDescription('Silencia um membro (timeout nativo do Discord)')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
     .setDMPermission(false)
     .addUserOption((opt) => opt.setName('usuario').setDescription('Membro a silenciar').setRequired(true))
     .addStringOption((opt) =>

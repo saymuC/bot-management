@@ -44,7 +44,6 @@ const {
   TextInputBuilder,
   TextInputStyle,
   MessageFlags,
-  PermissionFlagsBits,
 } = require('discord.js');
 
 const { errorEmbed, successEmbed } = require('../utils/embeds');
@@ -66,6 +65,7 @@ const {
 } = require('../utils/tickets/categories');
 const { PREFIX, VIEWS, MAX_CATEGORIES, HEX_OPTION, buildPanelPayload } = require('./ticketSetupViews');
 const { buildStatsPage } = require('./ticketStatsHandler');
+const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
 
 const safeAck = makeSafeAck('ticket-setup');
 
@@ -411,10 +411,10 @@ async function handlePublish(interaction, config) {
 
 /** Roteia as interações do painel (`tsetup_*`). */
 async function routeTicketSetup(interaction) {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+  if (!canUseCommand(interaction, 'ticket-config')) {
     return safeAck(interaction, () =>
       interaction.reply({
-        embeds: [errorEmbed('Apenas administradores podem alterar o sistema de tickets.')],
+        embeds: [errorEmbed(PERMISSION_DENIED_MESSAGE)],
         flags: MessageFlags.Ephemeral,
       })
     );

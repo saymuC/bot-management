@@ -26,10 +26,13 @@ function describeApiError(err) {
 
 module.exports = {
   ephemeral: false,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'config',
+  requiredPermission: PermissionFlagsBits.ManageGuildExpressions,
   data: new SlashCommandBuilder()
     .setName('emoji-add')
     .setDescription('Adiciona a este servidor um emoji de outro servidor, de um ID ou de uma imagem')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuildExpressions)
     .setDMPermission(false)
     .addStringOption((opt) =>
       opt

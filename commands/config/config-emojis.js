@@ -5,10 +5,13 @@ const { buildEmojiPanel, isAllowed } = require('../../handlers/emojiConfigHandle
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'config',
+  requiredPermission: PermissionFlagsBits.Administrator,
   data: new SlashCommandBuilder()
     .setName('config-emojis')
     .setDescription('Abre o painel para trocar os emojis usados pelo bot')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .setDMPermission(false),
 
   async execute(interaction) {

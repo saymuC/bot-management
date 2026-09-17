@@ -5,10 +5,13 @@ const { buildStatusPanel, clearDraft, isAllowed } = require('../../handlers/botS
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'config',
+  requiredPermission: PermissionFlagsBits.Administrator,
   data: new SlashCommandBuilder()
     .setName('bot-status')
     .setDescription('Abre o painel para alterar o status e a atividade do bot')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .setDMPermission(false),
 
   async execute(interaction) {

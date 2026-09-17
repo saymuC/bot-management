@@ -15,10 +15,10 @@ const {
   TextInputBuilder,
   TextInputStyle,
   MessageFlags,
-  PermissionFlagsBits,
 } = require('discord.js');
 
 const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
+const { canUseCommand } = require('../utils/commandPermissions');
 const { colors } = require('../config/settings');
 const {
   STATUSES,
@@ -324,7 +324,7 @@ function handleClose(interaction) {
 function isAllowed(interaction) {
   const ownerId = process.env.OWNER_ID?.trim();
   if (ownerId) return interaction.user.id === ownerId;
-  return interaction.memberPermissions?.has(PermissionFlagsBits.Administrator) ?? false;
+  return canUseCommand(interaction, 'bot-status');
 }
 
 /** Roteia as interações do painel (`bstatus_*`). */

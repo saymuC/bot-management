@@ -13,10 +13,13 @@ const { emoji } = require('../../utils/emojis');
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'giveaways',
+  requiredPermission: PermissionFlagsBits.ManageGuild,
   data: new SlashCommandBuilder()
     .setName('giveaway-stop')
     .setDescription('Cancela um sorteio em andamento sem sortear nenhum vencedor')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .setDMPermission(false)
     .addStringOption((opt) =>
       opt

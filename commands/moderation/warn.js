@@ -13,10 +13,13 @@ const countWarns = db.prepare('SELECT COUNT(*) AS n FROM warns WHERE guild_id = 
 
 module.exports = {
   ephemeral: false,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'moderation',
+  requiredPermission: PermissionFlagsBits.ModerateMembers,
   data: new SlashCommandBuilder()
     .setName('warn')
     .setDescription('Aplica uma advertência a um membro')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
     .setDMPermission(false)
     .addUserOption((opt) => opt.setName('usuario').setDescription('Membro a advertir').setRequired(true))
     .addStringOption((opt) => opt.setName('motivo').setDescription('Motivo da advertência').setRequired(true)),

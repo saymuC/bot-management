@@ -5,10 +5,13 @@ const { MAX_TOTAL_XP } = require('../../utils/levels/formula');
 
 module.exports = {
   ephemeral: false,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'levels',
+  requiredPermission: PermissionFlagsBits.ManageGuild,
   data: new SlashCommandBuilder()
     .setName('remove-xp')
     .setDescription('Remove XP de um membro (nunca fica negativo)')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .setDMPermission(false)
     .addUserOption((opt) => opt.setName('usuario').setDescription('Membro que perde o XP').setRequired(true))
     .addIntegerOption((opt) =>

@@ -77,7 +77,7 @@ test('central mostra as opções combinadas', () => {
   assert.equal(payload.embeds[0].data.title, '⚙️ Central de Configuração');
   assert.deepEqual(
     select.options.map((option) => option.value),
-    ['verify', 'logs', 'tickets', 'automod', 'welcome', 'levels', 'emojis', 'autorole', 'reactionrole']
+    ['verify', 'logs', 'tickets', 'automod', 'welcome', 'levels', 'emojis', 'autorole', 'permissions', 'reactionrole']
   );
   assert.deepEqual(payload.allowedMentions, { parse: [] });
 });
@@ -170,11 +170,11 @@ test('selecionar canal de logs salva na hora e limpa componentes', async () => {
   assert.match(i.calls[0].payload.embeds[0].data.description, /Canal de logs definido/);
 });
 
-test('não administrador recebe aviso claro', async () => {
+test('sem permissão recebe a recusa única do gate', async () => {
   const i = interaction({ admin: false });
 
   await routeConfigCenter(i);
 
   assert.equal(i.calls[0].method, 'reply');
-  assert.match(i.calls[0].payload.embeds[0].data.description, /Você precisa ser administrador/);
+  assert.match(i.calls[0].payload.embeds[0].data.description, /Você não tem permissão para usar este comando/);
 });

@@ -14,10 +14,13 @@ const setMessageId = db.prepare('UPDATE giveaways SET message_id = ? WHERE id = 
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'giveaways',
+  requiredPermission: PermissionFlagsBits.ManageGuild,
   data: new SlashCommandBuilder()
     .setName('giveaway-start')
     .setDescription('Inicia um sorteio')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .setDMPermission(false)
     .addStringOption((opt) => opt.setName('premio').setDescription('Prêmio do sorteio').setRequired(true).setMaxLength(200))
     .addStringOption((opt) => opt.setName('duracao').setDescription('Duração (ex: 30m, 1h, 2d)').setRequired(true))

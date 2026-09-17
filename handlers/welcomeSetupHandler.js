@@ -17,7 +17,6 @@ const {
   TextInputBuilder,
   TextInputStyle,
   MessageFlags,
-  PermissionFlagsBits,
 } = require('discord.js');
 
 const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
@@ -36,6 +35,7 @@ const {
   normalizeConfig,
 } = require('../utils/welcomeConfig');
 const { makeSafeAck, swallowAckFailure } = require('../utils/interactionAck');
+const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
 
 const PREFIX = 'wsetup_';
 
@@ -342,10 +342,10 @@ function handleClose(interaction) {
 
 /** Roteia as interações do painel (`wsetup_*`). */
 async function routeWelcomeSetup(interaction) {
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
+  if (!canUseCommand(interaction, 'setup-welcome')) {
     return safeAck(interaction, () =>
       interaction.reply({
-        embeds: [errorEmbed('Apenas administradores podem alterar as boas-vindas.')],
+        embeds: [errorEmbed(PERMISSION_DENIED_MESSAGE)],
         flags: MessageFlags.Ephemeral,
       })
     );

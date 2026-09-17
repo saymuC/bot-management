@@ -11,10 +11,13 @@ const listWarns = db.prepare(
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'moderation',
+  requiredPermission: PermissionFlagsBits.ModerateMembers,
   data: new SlashCommandBuilder()
     .setName('warnings')
     .setDescription('Lista as advertências de um membro')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
     .setDMPermission(false)
     .addUserOption((opt) => opt.setName('usuario').setDescription('Membro a consultar').setRequired(true)),
 

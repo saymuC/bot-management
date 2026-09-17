@@ -13,6 +13,8 @@ const { routeAutomodSetup } = require('../handlers/automodSetupHandler');
 const { routeLevelsSetup } = require('../handlers/levelsSetupHandler');
 const { routeConfigCenter } = require('../handlers/configCenterHandler');
 const { handleTopPagination } = require('../handlers/levelsLeaderboardHandler');
+const { routePermissionsSetup } = require('../handlers/permissionsSetupHandler');
+const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
 const { db } = require('../database/db');
 const { errorEmbed, successEmbed } = require('../utils/embeds');
 const { respond } = require('../utils/interactions');
@@ -59,6 +61,17 @@ module.exports = {
       if (interaction.isChatInputCommand()) {
         const command = client.commands.get(interaction.commandName);
         if (!command) return;
+
+        // Gate de permissão do bot. Vem antes do defer porque a recusa é sempre
+        // efêmera, e o defer do comando pode ser público (`ephemeral: false`) —
+        // recusar ali vazaria a negativa para o canal.
+        if (!canUseCommand(interaction, command)) {
+          await interaction.reply({
+            embeds: [errorEmbed(PERMISSION_DENIED_MESSAGE, undefined, interaction.guild)],
+            flags: MessageFlags.Ephemeral,
+          });
+          return;
+        }
 
         // Discord fecha a janela de resposta em 3s. Comandos que fazem chamadas REST
         // antes de responder (enviar mensagem, banir, criar canal) estouram esse prazo
@@ -118,6 +131,12 @@ module.exports = {
       // Central do /config: só escolhe o painel existente ou salva o canal geral de logs.
       if (customId.startsWith('config_')) {
         await routeConfigCenter(interaction);
+        return;
+      }
+      // Painel de permissões de comandos (dentro do /config): só selects e
+      // botões, e o handler cuida do próprio ack.
+      if (customId.startsWith('perms_')) {
+        await routePermissionsSetup(interaction);
         return;
       }
       // Painel do /automod: selects, modais de limites e escada — próprio ack.

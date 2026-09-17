@@ -7,10 +7,13 @@ const { emoji } = require('../../utils/emojis');
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'moderation',
+  requiredPermission: PermissionFlagsBits.ManageMessages,
   data: new SlashCommandBuilder()
     .setName('clear')
     .setDescription('Apaga mensagens do canal atual')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .setDMPermission(false)
     .addIntegerOption((opt) =>
       opt.setName('quantidade').setDescription('Quantidade (1-100)').setRequired(true).setMinValue(1).setMaxValue(100)

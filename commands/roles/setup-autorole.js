@@ -6,10 +6,13 @@ const { validateAssignableRole } = require('../../utils/assignableRoles');
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'roles',
+  requiredPermission: PermissionFlagsBits.ManageRoles,
   data: new SlashCommandBuilder()
     .setName('setup-autorole')
     .setDescription('Define o cargo automático para novos membros')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
     .setDMPermission(false)
     .addRoleOption((opt) => opt.setName('cargo').setDescription('Cargo automático (vazio para desativar)')),
 

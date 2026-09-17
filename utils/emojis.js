@@ -46,6 +46,7 @@ const REGISTRY = Object.freeze({
   config_center: { label: 'Central de configuração', default: '⚙️', category: 'general', usage: 'Título do /config' },
   config_logs: { label: 'Configuração de logs', default: '📜', category: 'general', usage: 'Opção de logs no /config' },
   config_emojis: { label: 'Configuração de emojis', default: '😀', category: 'general', usage: 'Opção de emojis no /config' },
+  config_permissions: { label: 'Permissões de comandos', default: '🔑', category: 'general', usage: 'Painel de permissões de comandos no /config' },
 
   ticket: { label: 'Ticket', default: '🎫', category: 'tickets', usage: 'Botão e título do painel de atendimento' },
   ticket_claim: { label: 'Assumir ticket', default: '🙋', category: 'tickets', usage: 'Botão de assumir o atendimento' },

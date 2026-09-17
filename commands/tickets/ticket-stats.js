@@ -4,10 +4,13 @@ const { buildStatsPage } = require('../../handlers/ticketStatsHandler');
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'tickets',
+  requiredPermission: PermissionFlagsBits.ManageMessages,
   data: new SlashCommandBuilder()
     .setName('ticket-stats')
     .setDescription('Ranking dos atendentes: nota média, tickets reivindicados/fechados e TMA')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .setDMPermission(false)
     .addIntegerOption((opt) =>
       opt.setName('pagina').setDescription('Página inicial (10 atendentes por página)').setMinValue(1)

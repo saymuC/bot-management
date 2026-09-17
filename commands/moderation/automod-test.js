@@ -16,10 +16,13 @@ const { dryRun } = require('../../handlers/automodHandler');
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'moderation',
+  requiredPermission: PermissionFlagsBits.ManageGuild,
   data: new SlashCommandBuilder()
     .setName('automod-test')
     .setDescription('Testa um texto contra as regras do AutoMod sem punir ninguém')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
     .setDMPermission(false)
     .addStringOption((opt) =>
       opt.setName('texto').setDescription('O texto a testar').setRequired(true).setMaxLength(2000)

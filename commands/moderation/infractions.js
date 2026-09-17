@@ -129,10 +129,13 @@ function describeRow(row, expireMs, now, expiredMark) {
 
 module.exports = {
   ephemeral: true,
+  // Quem pode usar vem de utils/commandPermissions.js (cargos do servidor).
+  // `requiredPermission` é só o fallback de quem nunca configurou nada.
+  permissionGroup: 'moderation',
+  requiredPermission: PermissionFlagsBits.ModerateMembers,
   data: new SlashCommandBuilder()
     .setName('infractions')
     .setDescription('Mostra os pontos e o histórico de infrações do AutoMod de um membro')
-    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
     .setDMPermission(false)
     .addUserOption((opt) => opt.setName('usuario').setDescription('Membro a consultar').setRequired(true))
     .addBooleanOption((opt) =>
