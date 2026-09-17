@@ -1,9 +1,9 @@
 /**
  * Registro central dos emojis do bot.
  *
- * Todo emoji que aparece para os membros mora aqui, com um padrão unicode e a
- * possibilidade de sobrescrita por servidor (JSON em `guild_config.emoji_config`).
- * Assim o `/config-emojis` troca o visual do bot sem precisar mexer em código.
+ * Todo emoji que aparece para os membros mora aqui, com um padrão unicode e uma
+ * sobrescrita global do bot (JSON em `bot_settings.emoji_config`). Assim o
+ * `/config-emojis` troca o visual do bot inteiro sem precisar mexer em código.
  *
  * Cuidado com emojis personalizados: o Discord só renderiza `<:nome:id>` se o
  * bot compartilhar um servidor com aquele emoji. Um id inválido faz o envio da
@@ -11,7 +11,10 @@
  * guild e o emoji personalizado não existe mais nela.
  */
 
-const { getGuildConfig, setGuildConfig } = require('../database/db');
+const { db, getBotSetting, setBotSetting } = require('../database/db');
+
+const EMOJI_CONFIG_KEY = 'emoji_config';
+const getLegacyEmojiConfig = db.prepare('SELECT emoji_config FROM guild_config WHERE emoji_config IS NOT NULL LIMIT 1');
 
 /** Categorias, só para agrupar o painel. */
 const CATEGORIES = Object.freeze({
@@ -40,6 +43,9 @@ const REGISTRY = Object.freeze({
   timer: { label: 'Tempo', default: '⏳', category: 'general', usage: 'Esperas, prazos e itens vencidos' },
   page_prev: { label: 'Página anterior', default: '⬅️', category: 'general', usage: 'Botão de voltar em listas paginadas' },
   page_next: { label: 'Página seguinte', default: '➡️', category: 'general', usage: 'Botão de avançar em listas paginadas' },
+  config_center: { label: 'Central de configuração', default: '⚙️', category: 'general', usage: 'Título do /config' },
+  config_logs: { label: 'Configuração de logs', default: '📜', category: 'general', usage: 'Opção de logs no /config' },
+  config_emojis: { label: 'Configuração de emojis', default: '😀', category: 'general', usage: 'Opção de emojis no /config' },
 
   ticket: { label: 'Ticket', default: '🎫', category: 'tickets', usage: 'Botão e título do painel de atendimento' },
   ticket_claim: { label: 'Assumir ticket', default: '🙋', category: 'tickets', usage: 'Botão de assumir o atendimento' },
@@ -94,6 +100,7 @@ const REGISTRY = Object.freeze({
   medal_bronze: { label: '3º lugar', default: '🥉', category: 'levels', usage: 'Terceiro colocado do ranking' },
 
   reaction_role: { label: 'Autoatribuição de cargo', default: '🎭', category: 'roles', usage: 'Painel e botão do /reactionrole-setup' },
+  autorole: { label: 'Cargo automático', default: '🎖️', category: 'roles', usage: 'Opção e painel de autorole no /config' },
 
   message_edit: { label: 'Mensagem editada', default: '✏️', category: 'logs', usage: 'Log de edição' },
   message_delete: { label: 'Mensagem apagada', default: '🗑️', category: 'logs', usage: 'Log de exclusão' },
@@ -211,9 +218,10 @@ function normalizeEmojis(raw) {
   return merged;
 }
 
-/** Emojis do servidor (padrões + sobrescritas salvas). */
-function getGuildEmojis(guildId) {
-  const stored = getGuildConfig(guildId)?.emoji_config;
+/** Emojis globais do bot (padrões + sobrescritas salvas). */
+function getGuildEmojis() {
+  const stored = getBotSetting(EMOJI_CONFIG_KEY) ?? getLegacyEmojiConfig.get()?.emoji_config;
+  if (stored && !getBotSetting(EMOJI_CONFIG_KEY)) setBotSetting(EMOJI_CONFIG_KEY, stored);
   if (!stored) return { ...DEFAULT_EMOJIS };
   try {
     return normalizeEmojis(JSON.parse(stored));
@@ -224,28 +232,28 @@ function getGuildEmojis(guildId) {
 }
 
 /** Grava apenas o que difere do padrão, para o JSON não inflar. */
-function saveGuildEmojis(guildId, emojis) {
+function saveGuildEmojis(_guildId, emojis) {
   const normalized = normalizeEmojis(emojis);
   const overrides = Object.fromEntries(
     KEYS.filter((key) => normalized[key] !== DEFAULT_EMOJIS[key]).map((key) => [key, normalized[key]])
   );
 
-  setGuildConfig(guildId, 'emoji_config', Object.keys(overrides).length ? JSON.stringify(overrides) : null);
+  setBotSetting(EMOJI_CONFIG_KEY, Object.keys(overrides).length ? JSON.stringify(overrides) : null);
   return normalized;
 }
 
-function setGuildEmoji(guildId, key, value) {
+function setGuildEmoji(_guildId, key, value) {
   if (!Object.hasOwn(REGISTRY, key)) throw new Error(`Emoji desconhecido: ${key}`);
-  return saveGuildEmojis(guildId, { ...getGuildEmojis(guildId), [key]: value });
+  return saveGuildEmojis(null, { ...getGuildEmojis(), [key]: value });
 }
 
-function resetGuildEmoji(guildId, key) {
+function resetGuildEmoji(_guildId, key) {
   if (!Object.hasOwn(REGISTRY, key)) throw new Error(`Emoji desconhecido: ${key}`);
-  return saveGuildEmojis(guildId, { ...getGuildEmojis(guildId), [key]: DEFAULT_EMOJIS[key] });
+  return saveGuildEmojis(null, { ...getGuildEmojis(), [key]: DEFAULT_EMOJIS[key] });
 }
 
-function resetGuildEmojis(guildId) {
-  setGuildConfig(guildId, 'emoji_config', null);
+function resetGuildEmojis() {
+  setBotSetting(EMOJI_CONFIG_KEY, null);
   return { ...DEFAULT_EMOJIS };
 }
 

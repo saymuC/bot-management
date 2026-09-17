@@ -7,14 +7,16 @@ const { centerPayload, routeConfigCenter } = require('../handlers/configCenterHa
 
 const GUILD = '900000000000000000';
 const LOG_CHANNEL = '900000000000000001';
+const ROLE_ID = '900000000000000003';
 
 function fakeGuild() {
   const channel = { id: LOG_CHANNEL, name: 'logs', toString: () => `<#${LOG_CHANNEL}>` };
+  const role = { id: ROLE_ID, name: 'Membro', position: 1, managed: false, toString: () => `<@&${ROLE_ID}>` };
   return {
     id: GUILD,
     name: 'Servidor de Teste',
     channels: { cache: new Collection([[channel.id, channel]]) },
-    roles: { cache: new Collection() },
+    roles: { everyone: { id: GUILD }, cache: new Collection([[role.id, role]]) },
     emojis: { cache: new Collection() },
     members: { me: { roles: { highest: { position: 100 } }, permissions: { has: () => true } } },
   };
@@ -30,7 +32,7 @@ function fakeMember(guild) {
   };
 }
 
-function interaction({ customId = 'config_open', values = ['logs'], admin = true, channels = [] } = {}) {
+function interaction({ customId = 'config_open', values = ['logs'], admin = true, channels = [], roles = [] } = {}) {
   const guild = fakeGuild();
   const calls = [];
   const i = {
@@ -43,6 +45,7 @@ function interaction({ customId = 'config_open', values = ['logs'], admin = true
     createdTimestamp: Date.now(),
     memberPermissions: { has: (permission) => admin && permission === PermissionFlagsBits.Administrator },
     channels: { first: () => channels[0] ?? null },
+    roles: { first: () => roles[0] ?? null },
     update: async (payload) => {
       calls.push({ method: 'update', payload });
     },
@@ -56,14 +59,14 @@ function interaction({ customId = 'config_open', values = ['logs'], admin = true
 
 const rows = (payload) => payload.components.map((row) => row.toJSON());
 
-test('central mostra as seis opções combinadas', () => {
+test('central mostra as opções combinadas', () => {
   const payload = centerPayload(fakeGuild());
   const select = rows(payload)[0].components[0];
 
   assert.equal(payload.embeds[0].data.title, '⚙️ Central de Configuração');
   assert.deepEqual(
     select.options.map((option) => option.value),
-    ['verify', 'logs', 'tickets', 'automod', 'welcome', 'levels']
+    ['verify', 'logs', 'tickets', 'automod', 'welcome', 'levels', 'emojis', 'autorole', 'reactionrole']
   );
   assert.deepEqual(payload.allowedMentions, { parse: [] });
 });
@@ -88,6 +91,9 @@ test('selecionar cada painel abre o payload existente', async () => {
     automod: 'Painel do AutoMod',
     welcome: 'Painel de boas-vindas',
     levels: 'Configuração de níveis e XP',
+    emojis: 'Emojis do bot',
+    autorole: 'Cargo automático',
+    reactionrole: 'Reaction role',
   };
 
   for (const [value, marker] of Object.entries(expected)) {
@@ -97,6 +103,28 @@ test('selecionar cada painel abre o payload existente', async () => {
     assert.equal(i.calls[0].method, 'update', value);
     assert.match(`${i.calls[0].payload.content ?? ''} ${i.calls[0].payload.embeds[0].data.title}`, new RegExp(marker), value);
   }
+});
+
+test('selecionar cargo do autorole salva direto', async () => {
+  const role = fakeGuild().roles.cache.get(ROLE_ID);
+  const i = interaction({ customId: 'config_autorole-role', roles: [role] });
+
+  await routeConfigCenter(i);
+
+  assert.equal(getGuildConfig(GUILD).autorole_id, ROLE_ID);
+  assert.equal(i.calls[0].method, 'update');
+  assert.match(i.calls[0].payload.embeds[0].data.description, /Novos membros receberão/);
+});
+
+test('selecionar cargo do reaction role pede canal', async () => {
+  const role = fakeGuild().roles.cache.get(ROLE_ID);
+  const i = interaction({ customId: 'config_rr-role', roles: [role] });
+
+  await routeConfigCenter(i);
+
+  assert.equal(i.calls[0].method, 'update');
+  assert.match(i.calls[0].payload.embeds[0].data.description, /Agora selecione o canal/);
+  assert.equal(rows(i.calls[0].payload)[0].components[0].custom_id, `config_rr-channel:${ROLE_ID}`);
 });
 
 test('selecionar canal de logs salva na hora e limpa componentes', async () => {
