@@ -15,7 +15,8 @@ async function logEvent(guild, title, description, color = colors.info, fields =
     channelId = getGuildConfig(guild.id)?.log_channel_id;
     if (!channelId) return;
 
-    const channel = await guild.channels.fetch(channelId).catch(() => null);
+    const channel = await guild.client.channels.fetch(channelId).catch(() => null);
+    if (channel?.guildId !== guild.id) return;
     if (!channel?.isTextBased()) return;
 
     await channel.send({ embeds: [baseEmbed({ title, description, color, fields })] });
