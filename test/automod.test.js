@@ -666,32 +666,25 @@ test('parseLadderLine lê "pontos ação duração"', () => {
 /** Membro falso só com o cache de canais que o `parentOf` consulta. */
 const memberWithChannels = (entries) => ({ guild: { channels: { cache: new Map(entries) } } });
 
-test('watchesChannel restringe só as regras de lista de canais', () => {
+test('watchesChannel não restringe mídia: canais entram como isenção', () => {
   const member = memberWithChannels([['topico', { parentId: 'geral' }]]);
 
-  // Regra comum: vale em qualquer canal, a lista nem é consultada.
   assert.equal(watchesChannel('links', { watchChannelIds: [] }, member, 'geral'), true);
-
-  // Regra de lista: vazia é "nenhum canal", não "todos".
-  assert.equal(watchesChannel('media', { watchChannelIds: [] }, member, 'geral'), false);
+  assert.equal(watchesChannel('media', { watchChannelIds: [] }, member, 'geral'), true);
   assert.equal(watchesChannel('media', { watchChannelIds: ['geral'] }, member, 'geral'), true);
-  assert.equal(watchesChannel('media', { watchChannelIds: ['geral'] }, member, 'memes'), false);
-
-  // Vigiar o canal-pai vigia o tópico dele.
+  assert.equal(watchesChannel('media', { watchChannelIds: ['geral'] }, member, 'memes'), true);
   assert.equal(watchesChannel('media', { watchChannelIds: ['geral'] }, member, 'topico'), true);
-  assert.equal(watchesChannel('media', { watchChannelIds: ['outro'] }, member, 'topico'), false);
 });
 
-test('findViolation não consulta a regra de mídia fora dos canais vigiados', async () => {
+test('findViolation aplica mídia no servidor todo quando o canal não está isento', async () => {
   const { findViolation } = require('../utils/automod/detectors');
-  const SO_TEXTO = '100000000000000001';
+  const GERAL = '100000000000000001';
   const MEMES = '100000000000000002';
 
   const config = normalizeConfig({
     enabled: true,
     ladder: [],
-    // Ids de verdade: `normalizeConfig` descarta o que não é snowflake.
-    rules: { media: { enabled: true, watchChannelIds: [SO_TEXTO] } },
+    rules: { media: { enabled: true } },
   });
 
   const ctx = (channelId) => ({
@@ -707,25 +700,50 @@ test('findViolation não consulta a regra de mídia fora dos canais vigiados', a
     now: Date.now(),
   });
 
-  const inside = await findViolation(ctx(SO_TEXTO), config);
-  assert.equal(inside?.key, 'media', 'no canal vigiado a regra pega o link de mídia');
+  assert.equal((await findViolation(ctx(GERAL), config))?.key, 'media');
+  assert.equal((await findViolation(ctx(MEMES), config))?.key, 'media');
+});
 
-  assert.equal(await findViolation(ctx(MEMES), config), null, 'fora dele nem é avaliada');
+test('findViolation pula mídia em canal isento', async () => {
+  const { findViolation } = require('../utils/automod/detectors');
+  const GERAL = '100000000000000001';
+  const MEMES = '100000000000000002';
+
+  const config = normalizeConfig({
+    enabled: true,
+    ladder: [],
+    rules: { media: { enabled: true, exemptChannelIds: [MEMES] } },
+  });
+
+  const ctx = (channelId) => ({
+    content: 'olha isto https://i.imgur.com/foto.png',
+    signature: 'olha isto',
+    member: memberWithChannels([]),
+    guild: null,
+    channelId,
+    attachmentFiles: [],
+    attachmentNames: [],
+    attachments: 0,
+    stickers: 0,
+    now: Date.now(),
+  });
+
+  assert.equal((await findViolation(ctx(GERAL), config))?.key, 'media');
+  assert.equal(await findViolation(ctx(MEMES), config), null);
 });
 
 test('idleReason aponta a regra ligada que não vai agir', () => {
   const media = (extra) => ({ ...ruleDefaults('media'), enabled: true, ...extra });
 
-  assert.equal(idleReason('media', media({})), 'nenhum canal vigiado');
   assert.equal(
-    idleReason('media', media({ watchChannelIds: ['c'], limits: { images: false, gifs: false, videos: false, files: false, stickers: false } })),
+    idleReason('media', media({ limits: { images: false, gifs: false, videos: false, files: false, stickers: false } })),
     'nenhuma categoria marcada'
   );
   assert.equal(
-    idleReason('media', media({ watchChannelIds: ['c'], deleteMessage: false, action: 'none', points: 0 })),
+    idleReason('media', media({ deleteMessage: false, action: 'none', points: 0 })),
     'não apaga, não pune e não dá pontos'
   );
-  assert.equal(idleReason('media', media({ watchChannelIds: ['c'] })), null, 'configurada: age');
+  assert.equal(idleReason('media', media({})), null, 'configurada: age');
   assert.equal(idleReason('media', { ...ruleDefaults('media'), enabled: false }), null, 'desligada não é aviso');
 });
 
