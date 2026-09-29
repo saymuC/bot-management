@@ -14,6 +14,7 @@ const { routeLevelsSetup } = require('../handlers/levelsSetupHandler');
 const { routeConfigCenter } = require('../handlers/configCenterHandler');
 const { handleTopPagination } = require('../handlers/levelsLeaderboardHandler');
 const { routePermissionsSetup } = require('../handlers/permissionsSetupHandler');
+const { buildAvatarEmbed, buildPermissionsEmbeds } = require('../commands/user/info');
 const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
 const { db } = require('../database/db');
 const { errorEmbed, successEmbed } = require('../utils/embeds');
@@ -90,6 +91,24 @@ module.exports = {
 
       // ---- Botões / selects / modals roteados por customId ----
       const customId = interaction.customId ?? '';
+
+      if (interaction.isButton() && customId.startsWith('userinfo_')) {
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const [, view, userId] = customId.split('_');
+        const member = interaction.guild
+          ? await interaction.guild.members.fetch(userId).catch(() => null)
+          : null;
+        if (!member) {
+          await interaction.editReply({ embeds: [errorEmbed('Esse usuário não está mais disponível neste servidor.')] });
+          return;
+        }
+        const embeds = view === 'avatar' ? [buildAvatarEmbed(member)] : buildPermissionsEmbeds(member);
+        await interaction.editReply({ embeds: embeds.slice(0, 10) });
+        for (let index = 10; index < embeds.length; index += 10) {
+          await interaction.followUp({ embeds: embeds.slice(index, index + 10), flags: MessageFlags.Ephemeral });
+        }
+        return;
+      }
 
       // O fluxo de tickets gerencia o próprio ack (deferUpdate no select,
       // showModal na avaliação — nenhum dos dois admite deferReply antes).

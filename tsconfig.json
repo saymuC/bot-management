@@ -26,6 +26,7 @@
     "utils/commandPermissions.js",
     "handlers/levels*.js",
     "handlers/permissionsSetupHandler.js",
-    "commands/levels/**/*.js"
+    "commands/levels/**/*.js",
+    "commands/user/**/*.js"
   ]
 }
