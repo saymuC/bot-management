@@ -24,6 +24,28 @@ const { logError } = require('../utils/observability');
 
 const reactionRoleStmt = db.prepare('SELECT * FROM reaction_roles WHERE id = ?');
 
+function batchEmbeds(embeds) {
+  const batches = [];
+  let batch = [];
+  let characters = 0;
+
+  for (const embed of embeds) {
+    const { title, description, author, footer, fields = [] } = embed.toJSON();
+    const length = (title?.length ?? 0) + (description?.length ?? 0)
+      + (author?.name.length ?? 0) + (footer?.text.length ?? 0)
+      + fields.reduce((total, field) => total + field.name.length + field.value.length, 0);
+    if (batch.length && (batch.length === 10 || characters + length > 6000)) {
+      batches.push(batch);
+      batch = [];
+      characters = 0;
+    }
+    batch.push(embed);
+    characters += length;
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
+}
+
 /** Toggle do self-role via botão (customId: rr_<id>). */
 async function handleRoleButton(interaction, entryId) {
   const entry = reactionRoleStmt.get(Number(entryId));
@@ -95,6 +117,10 @@ module.exports = {
       if (interaction.isButton() && customId.startsWith('userinfo_')) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         const [, view, userId] = customId.split('_');
+        if (!['avatar', 'permissions'].includes(view) || !/^\d{17,20}$/.test(userId ?? '')) {
+          await interaction.editReply({ embeds: [errorEmbed('Ação inválida.')] });
+          return;
+        }
         const member = interaction.guild
           ? await interaction.guild.members.fetch(userId).catch(() => null)
           : null;
@@ -103,9 +129,10 @@ module.exports = {
           return;
         }
         const embeds = view === 'avatar' ? [buildAvatarEmbed(member)] : buildPermissionsEmbeds(member);
-        await interaction.editReply({ embeds: embeds.slice(0, 10) });
-        for (let index = 10; index < embeds.length; index += 10) {
-          await interaction.followUp({ embeds: embeds.slice(index, index + 10), flags: MessageFlags.Ephemeral });
+        const batches = batchEmbeds(embeds);
+        await interaction.editReply({ embeds: batches[0] });
+        for (const batch of batches.slice(1)) {
+          await interaction.followUp({ embeds: batch, flags: MessageFlags.Ephemeral });
         }
         return;
       }

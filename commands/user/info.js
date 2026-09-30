@@ -151,7 +151,7 @@ function buildPermissionsEmbeds(member) {
   return [
     ...permissionPages.map((lines, index) => baseEmbed({
       title: `${emoji(member.guild, 'user_permissions')} Permissões de ${member.displayName}`,
-      description: `Permissões efetivas (${effectivePermissions.length}):\n${lines.join('\n')}`,
+       description: `Permissões gerais no servidor (${effectivePermissions.length}):\n${lines.join('\n')}`,
       thumbnail: member.user.displayAvatarURL({ size: 128 }),
       footer: `${member.guild.name} • permissões ${index + 1}/${permissionPages.length}`,
     })),
