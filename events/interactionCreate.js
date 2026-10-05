@@ -13,6 +13,7 @@ const { routeAutomodSetup } = require('../handlers/automodSetupHandler');
 const { routeLevelsSetup } = require('../handlers/levelsSetupHandler');
 const { routeConfigCenter } = require('../handlers/configCenterHandler');
 const { handleTopPagination } = require('../handlers/levelsLeaderboardHandler');
+const { handleRankingPagination } = require('../handlers/economyLeaderboardHandler');
 const { routePermissionsSetup } = require('../handlers/permissionsSetupHandler');
 const { buildAvatarEmbed, buildPermissionsEmbeds } = require('../commands/user/info');
 const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
@@ -196,6 +197,10 @@ module.exports = {
       // deixa explícito que a listagem pública não passa pelo gate de admin.
       if (customId.startsWith('lvltop_')) {
         await handleTopPagination(interaction, customId.slice('lvltop_'.length));
+        return;
+      }
+      if (interaction.isButton() && customId.startsWith('ecotop_')) {
+        await handleRankingPagination(interaction, customId.slice('ecotop_'.length));
         return;
       }
       // Painel do /levelconfig: modais de XP e recompensas — próprio ack.

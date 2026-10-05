@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS guild_config (
   verify_panel TEXT,
   automod_config TEXT,
   levels_config TEXT,
+  economy_config TEXT,
   autorole_id TEXT,
   mute_role_id TEXT,
   -- JSON de utils/commandPermissions.js: cargos por grupo de comandos e
@@ -156,6 +157,44 @@ CREATE TABLE IF NOT EXISTS user_levels (
   PRIMARY KEY (guild_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS economy_accounts (
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  wallet INTEGER NOT NULL DEFAULT 0 CHECK (wallet BETWEEN 0 AND 1000000000),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (guild_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS economy_transactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  type TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  balance_before INTEGER NOT NULL,
+  balance_after INTEGER NOT NULL,
+  metadata TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS economy_cooldowns (
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  PRIMARY KEY (guild_id, user_id, action)
+);
+
+CREATE TABLE IF NOT EXISTS economy_inventory (
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity >= 0),
+  acquired_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (guild_id, user_id, item_id)
+);
+
 CREATE TABLE IF NOT EXISTS reaction_roles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   guild_id TEXT NOT NULL,
@@ -173,6 +212,8 @@ CREATE INDEX IF NOT EXISTS idx_giveaways_pending ON giveaways (ended, ends_at);
 -- Cobre o /top e a posição individual: o desempate por user_id ASC faz parte do
 -- índice para a ordem do leaderboard ser estável sem custo extra de ordenação.
 CREATE INDEX IF NOT EXISTS idx_user_levels_leaderboard ON user_levels (guild_id, xp DESC, user_id ASC);
+CREATE INDEX IF NOT EXISTS idx_economy_leaderboard ON economy_accounts (guild_id, wallet DESC, user_id ASC);
+CREATE INDEX IF NOT EXISTS idx_economy_transactions_user ON economy_transactions (guild_id, user_id, id DESC);
 `);
 
 /**
@@ -191,7 +232,7 @@ function ensureColumn(table, column, definition) {
 const CONFIG_FIELDS = [
   'welcome_channel_id', 'welcome_message', 'welcome_config', 'emoji_config', 'log_channel_id',
   'ticket_category_id', 'ticket_panel_channel_id', 'ticket_log_channel_id', 'ticket_config',
-  'verify_channel_id', 'verify_role_id', 'verify_panel', 'automod_config', 'levels_config',
+  'verify_channel_id', 'verify_role_id', 'verify_panel', 'automod_config', 'levels_config', 'economy_config',
   'autorole_id', 'mute_role_id', 'command_permissions',
 ];
 
