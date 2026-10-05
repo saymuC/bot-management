@@ -14,6 +14,7 @@ const { routeLevelsSetup } = require('../handlers/levelsSetupHandler');
 const { routeConfigCenter } = require('../handlers/configCenterHandler');
 const { handleTopPagination } = require('../handlers/levelsLeaderboardHandler');
 const { handleRankingPagination } = require('../handlers/economyLeaderboardHandler');
+const { routeEconomyConfig } = require('../handlers/economyHandler');
 const { routePermissionsSetup } = require('../handlers/permissionsSetupHandler');
 const { buildAvatarEmbed, buildPermissionsEmbeds } = require('../commands/user/info');
 const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
@@ -201,6 +202,10 @@ module.exports = {
       }
       if (interaction.isButton() && customId.startsWith('ecotop_')) {
         await handleRankingPagination(interaction, customId.slice('ecotop_'.length));
+        return;
+      }
+      if (customId.startsWith('eco_cfg_')) {
+        await routeEconomyConfig(interaction);
         return;
       }
       // Painel do /levelconfig: modais de XP e recompensas — próprio ack.

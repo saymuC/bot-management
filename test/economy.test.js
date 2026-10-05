@@ -4,7 +4,7 @@ const { db } = require('../database/db');
 const repo = require('../utils/economy/repository');
 const { changeBalance, claimReward, purchaseItem } = require('../utils/economy/service');
 const { MAX_BALANCE, DAILY, WORK } = require('../config/economy');
-const { getEconomyConfig } = require('../config/economy');
+const { getEconomyConfig, saveEconomyConfig } = require('../config/economy');
 const { setGuildConfig } = require('../database/db');
 
 const GUILD = 'test-economy';
@@ -48,6 +48,23 @@ test('configuração por servidor cai nos defaults quando inválida e rege os ga
   assert.throws(() => claimReward({ guildId: GUILD, userId: USER, action: 'work' }), /desativada/);
   assert.throws(() => purchaseItem({ guildId: GUILD, userId: USER, itemId: 'cafe' }), /desativada/);
   assert.equal(getEconomyConfig(OTHER).enabled, true);
+});
+
+test('edição administrativa valida pares e preserva configuração anterior no erro', () => {
+  cleanup();
+  saveEconomyConfig(GUILD, { dailyMin: 420, dailyMax: 480, currencyName: 'créditos' });
+  assert.equal(getEconomyConfig(GUILD).currencyName, 'créditos');
+  for (const changes of [
+    { dailyMin: 600 }, { workCooldownMinutes: 0 }, { currencyEmoji: 'não é emoji' },
+    { currencyName: '@everyone' }, { dailyMax: NaN }, { unknown: 1 },
+  ]) {
+    assert.throws(() => saveEconomyConfig(GUILD, changes));
+    assert.equal(getEconomyConfig(GUILD).dailyMin, 420);
+    assert.equal(getEconomyConfig(GUILD).currencyName, 'créditos');
+  }
+  saveEconomyConfig(GUILD, { currencyEmoji: null, enabled: false });
+  assert.equal(getEconomyConfig(GUILD).enabled, false);
+  assert.equal(getEconomyConfig(OTHER).dailyMin, DAILY.min);
 });
 
 test('daily e trabalho respeitam cooldown persistente e não duplicam pagamento', () => {

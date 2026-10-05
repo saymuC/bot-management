@@ -2,7 +2,7 @@
 const MAX_BALANCE = 1_000_000_000;
 const DAILY = Object.freeze({ min: 300, max: 500, cooldownMs: 24 * 60 * 60 * 1000 });
 const WORK = Object.freeze({ min: 150, max: 300, cooldownMs: 30 * 60 * 1000 });
-const { getGuildConfig } = require('../database/db');
+const { getGuildConfig, setGuildConfig } = require('../database/db');
 const DEFAULT = Object.freeze({ enabled: true, dailyMin: DAILY.min, dailyMax: DAILY.max,
   workMin: WORK.min, workMax: WORK.max, workCooldownMinutes: 30, currencyName: 'moedas', currencyEmoji: null });
 
@@ -28,4 +28,29 @@ function getEconomyConfig(guildId) {
   return result;
 }
 
-module.exports = { MAX_BALANCE, DAILY, WORK, DEFAULT, getEconomyConfig };
+/** @param {string} guildId @param {object} changes */
+function saveEconomyConfig(guildId, changes) {
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes) ||
+      Object.keys(changes).some((key) => !Object.hasOwn(DEFAULT, key))) throw new Error('Campo de economia inválido.');
+  const config = getEconomyConfig(guildId);
+  const next = { ...config, ...changes };
+  if (typeof next.enabled !== 'boolean') throw new Error('Status inválido.');
+  if (typeof next.currencyName !== 'string' || !/^[\p{L}\p{N} ]{1,24}$/u.test(next.currencyName)) {
+    throw new Error('Nome da moeda inválido (1 a 24 letras, números ou espaços).');
+  }
+  const { parseEmojiInput } = require('../utils/emojis');
+  if (next.currencyEmoji !== null && !parseEmojiInput(next.currencyEmoji).ok) throw new Error('Emoji da moeda inválido.');
+  for (const [min, max] of [['dailyMin', 'dailyMax'], ['workMin', 'workMax']]) {
+    if (!Number.isSafeInteger(next[min]) || !Number.isSafeInteger(next[max]) ||
+        next[min] < 1 || next[min] > next[max] || next[max] > MAX_BALANCE) {
+      throw new Error('Recompensa inválida: mínimo deve ser positivo e não exceder o máximo.');
+    }
+  }
+  if (!Number.isSafeInteger(next.workCooldownMinutes) || next.workCooldownMinutes < 1 || next.workCooldownMinutes > 1440) {
+    throw new Error('Cooldown de trabalho deve ser de 1 a 1440 minutos.');
+  }
+  setGuildConfig(guildId, 'economy_config', JSON.stringify(next));
+  return next;
+}
+
+module.exports = { MAX_BALANCE, DAILY, WORK, DEFAULT, getEconomyConfig, saveEconomyConfig };
