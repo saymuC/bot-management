@@ -41,7 +41,7 @@ function parseHexColor(raw) {
 const successEmbed = (description, title, guild = null) =>
   baseEmbed({ title: title ?? `${emoji(guild, 'success')} Sucesso`, description, color: colors.success });
 
-/** @see successEmbed */
+/** @param {string} description @param {string} [title] @param {import('discord.js').Guild|string|null} [guild] */
 const errorEmbed = (description, title, guild = null) =>
   baseEmbed({ title: title ?? `${emoji(guild, 'error')} Erro`, description, color: colors.error });
 

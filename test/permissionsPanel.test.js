@@ -69,14 +69,14 @@ test('a central de configuração oferece o painel de permissões', () => {
   );
 });
 
-test('tela inicial lista os sete grupos e os dois caminhos', async () => {
+test('tela inicial lista os oito grupos e os dois caminhos', async () => {
   const i = interaction({ customId: 'perms_home' });
   await routePermissionsSetup(i);
 
   const payload = lastCall(i);
   const buttons = rows(payload)[0].components.map((button) => button.custom_id);
   assert.deepEqual(buttons, ['perms_groups', 'perms_commands']);
-  for (const label of ['Configuração', 'Moderação', 'Tickets', 'Níveis', 'Sorteios', 'Mensagens', 'Cargos']) {
+  for (const label of ['Configuração', 'Moderação', 'Tickets', 'Níveis', 'Economia', 'Sorteios', 'Mensagens', 'Cargos']) {
     assert.match(payload.embeds[0].data.description, new RegExp(label), label);
   }
 });

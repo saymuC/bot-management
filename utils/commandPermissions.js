@@ -106,6 +106,14 @@ const GROUPS = Object.freeze({
       'reset-xp': PermissionFlagsBits.ManageGuild,
     }),
   },
+  economy: {
+    label: 'Economia',
+    emoji: 'eco_coin',
+    description: 'Configuração da economia do servidor',
+    commands: Object.freeze({
+      'economy-config': PermissionFlagsBits.ManageGuild,
+    }),
+  },
   giveaways: {
     label: 'Sorteios',
     emoji: 'giveaway',

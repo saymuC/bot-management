@@ -23,10 +23,13 @@
   "include": [
     "config/**/*.js",
     "utils/levels/**/*.js",
+    "utils/economy/**/*.js",
     "utils/commandPermissions.js",
     "handlers/levels*.js",
     "handlers/permissionsSetupHandler.js",
     "commands/levels/**/*.js",
+    "commands/economy/**/*.js",
+    "handlers/economy*.js",
     "commands/user/**/*.js"
   ]
 }
