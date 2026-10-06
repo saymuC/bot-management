@@ -4,6 +4,10 @@ const { MAX_BALANCE, DAILY, WORK, getEconomyConfig } = require('../../config/eco
 const { ITEMS } = require('./shop');
 const { JOBS } = require('./jobs');
 
+class EconomyDisabledError extends Error {
+  constructor() { super('A economia está desativada neste servidor.'); }
+}
+
 function validateIds(guildId, userId) {
   if (!guildId || !userId) throw new Error('guildId e userId são obrigatórios.');
 }
@@ -36,7 +40,7 @@ function claimReward({ guildId, userId, action, now = Date.now(), random = Math.
   validateIds(guildId, userId);
   if (!['daily', 'work'].includes(action) || !Number.isSafeInteger(now) || now < 0) throw new Error('Recompensa inválida.');
   const settings = getEconomyConfig(guildId);
-  if (!settings.enabled) throw new Error('Economia desativada neste servidor.');
+  if (!settings.enabled) throw new EconomyDisabledError();
   const config = action === 'daily'
     ? { min: settings.dailyMin, max: settings.dailyMax, cooldownMs: DAILY.cooldownMs }
     : { min: settings.workMin, max: settings.workMax, cooldownMs: settings.workCooldownMinutes * 60_000 };
@@ -55,7 +59,7 @@ function claimReward({ guildId, userId, action, now = Date.now(), random = Math.
 /** @param {{guildId: string, userId: string, itemId: string}} params */
 function purchaseItem({ guildId, userId, itemId }) {
   validateIds(guildId, userId);
-  if (!getEconomyConfig(guildId).enabled) throw new Error('Economia desativada neste servidor.');
+  if (!getEconomyConfig(guildId).enabled) throw new EconomyDisabledError();
   const item = ITEMS.find((entry) => entry.id === itemId);
   if (!item) throw new Error('Item desconhecido.');
   const result = repository.applyBalance(guildId, userId, (balance) => {
@@ -65,4 +69,4 @@ function purchaseItem({ guildId, userId, itemId }) {
   return { ...result, item };
 }
 
-module.exports = { changeBalance, claimReward, purchaseItem };
+module.exports = { EconomyDisabledError, changeBalance, claimReward, purchaseItem };

@@ -35,6 +35,11 @@ test('saldo, extrato, limites e isolamento por servidor', () => {
   assert.throws(() => changeBalance({ guildId: GUILD, userId: USER, operation: 'add', amount: MAX_BALANCE, source: 'test' }), RangeError);
   assert.equal(repo.getBalance(GUILD, USER), 500);
   assert.equal(repo.getTransactions(GUILD, USER).length, 3);
+  changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: 0, source: 'test' });
+  assert.equal(repo.getBalance(GUILD, USER), 0);
+  assert.equal(repo.participantCount(GUILD), 0);
+  assert.equal(repo.rankOf(GUILD, USER), null);
+  assert.deepEqual(repo.leaderboardPage(GUILD, 10, 0), []);
 });
 
 test('configuração por servidor cai nos defaults quando inválida e rege os ganhos', () => {
