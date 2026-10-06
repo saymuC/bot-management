@@ -3,7 +3,7 @@ const { SlashCommandBuilder } = require('discord.js');
 const { respond } = require('../../utils/interactions');
 const { baseEmbed } = require('../../utils/embeds');
 const { emoji } = require('../../utils/emojis');
-const { claimReward } = require('../../utils/economy/service');
+const { claimReward, EconomyDisabledError } = require('../../utils/economy/service');
 const { formatMoney, formatWait } = require('../../utils/economy/formatter');
 const { currency } = require('../../utils/economy/currency');
 
@@ -13,7 +13,13 @@ module.exports = {
   /** @param {import('discord.js').ChatInputCommandInteraction} interaction */
   async execute(interaction) {
     if (!interaction.guild) throw new Error('Comando disponível apenas em servidores.');
-    const result = claimReward({ guildId: interaction.guild.id, userId: interaction.user.id, action: 'work' });
+    let result;
+    try {
+      result = claimReward({ guildId: interaction.guild.id, userId: interaction.user.id, action: 'work' });
+    } catch (err) {
+      if (!(err instanceof EconomyDisabledError)) throw err;
+      return respond(interaction, { embeds: [baseEmbed({ title: `${emoji(interaction.guild, 'eco_coin')} Economia`, description: err.message })] });
+    }
     const job = result.job;
     const { icon, name } = currency(interaction.guild);
     return respond(interaction, { embeds: [baseEmbed({

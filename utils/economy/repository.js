@@ -36,10 +36,10 @@ const balanceTransaction = db.transaction((guildId, userId, resolve) => {
 // BEGIN IMMEDIATE waits for competing writers before reading the old balance.
 const applyBalance = (...args) => balanceTransaction.immediate(...args);
 
-const leaderboardStmt = db.prepare('SELECT user_id, wallet FROM economy_accounts WHERE guild_id = ? ORDER BY wallet DESC, user_id ASC LIMIT ? OFFSET ?');
+const leaderboardStmt = db.prepare('SELECT user_id, wallet FROM economy_accounts WHERE guild_id = ? AND wallet > 0 ORDER BY wallet DESC, user_id ASC LIMIT ? OFFSET ?');
 const rankStmt = db.prepare(`SELECT COUNT(*) + 1 AS position FROM economy_accounts
-  WHERE guild_id = ? AND (wallet > ? OR (wallet = ? AND user_id < ?))`);
-const countStmt = db.prepare('SELECT COUNT(*) AS total FROM economy_accounts WHERE guild_id = ?');
+  WHERE guild_id = ? AND wallet > 0 AND (wallet > ? OR (wallet = ? AND user_id < ?))`);
+const countStmt = db.prepare('SELECT COUNT(*) AS total FROM economy_accounts WHERE guild_id = ? AND wallet > 0');
 const historyStmt = db.prepare('SELECT * FROM economy_transactions WHERE guild_id = ? AND user_id = ? ORDER BY id DESC LIMIT ?');
 const itemsStmt = db.prepare('SELECT item_id, quantity FROM economy_inventory WHERE guild_id = ? AND user_id = ? AND quantity > 0 ORDER BY acquired_at, item_id');
 
@@ -48,7 +48,7 @@ function leaderboardPage(guildId, limit, offset) { return leaderboardStmt.all(gu
 /** @param {string} guildId @param {string} userId */
 function rankOf(guildId, userId) {
   const row = balanceStmt.get(guildId, userId);
-  return row ? rankStmt.get(guildId, row.wallet, row.wallet, userId).position : null;
+  return row?.wallet > 0 ? rankStmt.get(guildId, row.wallet, row.wallet, userId).position : null;
 }
 /** @param {string} guildId */
 function participantCount(guildId) { return countStmt.get(guildId).total; }

@@ -30,9 +30,9 @@ async function buildRanking(guild, requestedPage, userId) {
       footer: `Página ${page}/${pages} · ${formatMoney(total)} participante(s) · Sua posição: ${position ? `#${position}` : 'sem posição'}`,
     })],
     components: [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`${PREFIX}${page - 1}_${userId}`).setEmoji(emoji(guild, 'page_prev'))
+      new ButtonBuilder().setCustomId(`${PREFIX}${page - 1}`).setEmoji(emoji(guild, 'page_prev'))
         .setStyle(ButtonStyle.Secondary).setDisabled(page <= 1),
-      new ButtonBuilder().setCustomId(`${PREFIX}${page + 1}_${userId}`).setEmoji(emoji(guild, 'page_next'))
+      new ButtonBuilder().setCustomId(`${PREFIX}${page + 1}`).setEmoji(emoji(guild, 'page_next'))
         .setStyle(ButtonStyle.Secondary).setDisabled(page >= pages)
     ).toJSON()],
   };
@@ -42,8 +42,7 @@ async function buildRanking(guild, requestedPage, userId) {
 async function handleRankingPagination(interaction, raw) {
   await interaction.deferUpdate();
   if (!interaction.guild) throw new Error('Ranking disponível apenas em servidores.');
-  const [page, userId] = raw.split('_');
-  return interaction.editReply(await buildRanking(interaction.guild, page, userId || interaction.user.id));
+  return interaction.editReply(await buildRanking(interaction.guild, raw, interaction.user.id));
 }
 
 module.exports = { PREFIX, buildRanking, handleRankingPagination };
