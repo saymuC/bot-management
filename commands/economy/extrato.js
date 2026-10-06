@@ -17,13 +17,14 @@ module.exports = {
     if (!interaction.guild) throw new Error('Comando disponível apenas em servidores.');
     const { icon, name } = currency(interaction.guild);
     const rows = getTransactions(interaction.guild.id, interaction.user.id, 10);
-    const lines = rows.map((row) => {
+    const fields = rows.map((row) => {
       const label = LABELS[row.type] ?? 'Ajuste de saldo';
-      return `\`#${row.id}\` ${label} · **${row.amount > 0 ? '+' : ''}${formatMoney(row.amount)}** ${name} · saldo ${formatMoney(row.balance_after)}`;
+      return { name: `#${row.id} · ${label}`, value: `${icon} **${row.amount > 0 ? '+' : ''}${formatMoney(row.amount)} ${name}** · saldo ${formatMoney(row.balance_after)}`, inline: false };
     });
     return respond(interaction, { embeds: [baseEmbed({
       title: `${emoji(interaction.guild, 'eco_statement')} Seu extrato`,
-      description: lines.length ? lines.join('\n') : 'Nenhuma movimentação registrada ainda.',
+      description: fields.length ? 'Suas últimas 10 movimentações, da mais recente para a mais antiga.' : 'Nenhuma movimentação registrada ainda.',
+      fields,
       footer: `Saldo atual: ${icon} ${formatMoney(getBalance(interaction.guild.id, interaction.user.id))} ${name}`,
     })] });
   },

@@ -27,15 +27,23 @@ module.exports = {
     const { icon, name } = currency(interaction.guild);
     const itemId = interaction.options.getString('item');
     if (!itemId) return respond(interaction, { embeds: [baseEmbed({
-      title: `${emoji(interaction.guild, 'eco_shop')} Loja`,
-      description: ITEMS.map((item) => `${emoji(interaction.guild, item.emojiKey)} **${item.name}** · ${icon} ${formatMoney(item.price)} ${name}`).join('\n')
-        + '\n\nUse /loja item para comprar.',
+      title: `${emoji(interaction.guild, 'eco_shop')} Vitrine da loja`,
+      description: 'Escolha um item e use `/loja item` para levar para o inventário.',
+      fields: ITEMS.map((item) => ({
+        name: `${emoji(interaction.guild, item.emojiKey)} ${item.name}`,
+        value: `${icon} **${formatMoney(item.price)} ${name}** · ${item.type === 'consumable' ? 'Consumível' : 'Colecionável'}`,
+        inline: true,
+      })),
     })] });
     try {
       const { item, balance } = purchaseItem({ guildId: interaction.guild.id, userId: interaction.user.id, itemId });
       return respond(interaction, { embeds: [baseEmbed({
         title: `${emoji(interaction.guild, 'eco_shop')} Compra concluída`,
-        description: `${emoji(interaction.guild, item.emojiKey)} ${item.name} adicionado ao inventário.\nSaldo: ${icon} ${formatMoney(balance)} ${name}.`,
+        description: `${emoji(interaction.guild, item.emojiKey)} **${item.name}** foi para o seu inventário.`,
+        fields: [
+          { name: 'Preço pago', value: `${icon} ${formatMoney(item.price)} ${name}`, inline: true },
+          { name: 'Saldo restante', value: `${icon} ${formatMoney(balance)} ${name}`, inline: true },
+        ],
       })] });
     } catch (err) {
       if (err instanceof EconomyDisabledError) {

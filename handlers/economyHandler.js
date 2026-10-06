@@ -10,16 +10,28 @@ const PREFIX = 'eco_cfg_';
 /** @param {import('discord.js').Guild} guild */
 function buildEconomyPanel(guild) {
   const config = getEconomyConfig(guild.id);
+  const coin = config.currencyEmoji ?? emoji(guild, 'eco_coin');
   return {
     embeds: [baseEmbed({
-      title: `${emoji(guild, 'eco_coin')} Configuração da economia`,
-      description: `Status: **${config.enabled ? 'Ativada' : 'Desativada'}**\nMoeda: ${config.currencyEmoji ?? emoji(guild, 'eco_coin')} ${config.currencyName}\nDaily: ${config.dailyMin}–${config.dailyMax} (24h)\nTrabalho: ${config.workMin}–${config.workMax} (${config.workCooldownMinutes}min)\n\nAs alterações são salvas automaticamente.`,
+      title: `${emoji(guild, 'eco_shop')} Economia do servidor`,
+      description: `Tudo abaixo é salvo automaticamente. ${config.enabled ? 'As recompensas e compras estão disponíveis.' : `${emoji(guild, 'warning')} Economia desligada: ganhos e compras ficam pausados; saldos e itens são preservados.`}`,
+      color: config.enabled ? undefined : 0x95a5a6,
+      fields: [
+        { name: 'Status', value: config.enabled ? `${emoji(guild, 'success')} Ativada` : `${emoji(guild, 'warning')} Desativada`, inline: true },
+        { name: 'Moeda', value: `${coin} ${config.currencyName}`, inline: true },
+        { name: `${emoji(guild, 'eco_daily')} Recompensa diária`, value: `${config.dailyMin.toLocaleString('pt-BR')} a ${config.dailyMax.toLocaleString('pt-BR')} · 24h`, inline: false },
+        { name: `${emoji(guild, 'eco_work')} Trabalho`, value: `${config.workMin.toLocaleString('pt-BR')} a ${config.workMax.toLocaleString('pt-BR')} · a cada ${config.workCooldownMinutes} min`, inline: false },
+      ],
+      footer: `Servidor: ${guild.name}`,
     })],
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`${PREFIX}toggle`).setLabel(config.enabled ? 'Desativar' : 'Ativar')
+        .setEmoji(emoji(guild, config.enabled ? 'warning' : 'success'))
         .setStyle(config.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(`${PREFIX}rewards`).setLabel('Recompensas').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`${PREFIX}currency`).setLabel('Moeda').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId(`${PREFIX}rewards`).setLabel('Recompensas').setEmoji(emoji(guild, 'eco_daily')).setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`${PREFIX}currency`).setLabel('Moeda').setEmoji(coin).setStyle(ButtonStyle.Secondary)
+    ).toJSON(), new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`${PREFIX}close`).setLabel('Fechar').setEmoji(emoji(guild, 'error')).setStyle(ButtonStyle.Secondary)
     ).toJSON()],
   };
 }
@@ -33,6 +45,9 @@ async function routeEconomyConfig(interaction) {
   if (interaction.isButton() && action === 'toggle') {
     saveEconomyConfig(interaction.guild.id, { enabled: !getEconomyConfig(interaction.guild.id).enabled });
     return interaction.update(buildEconomyPanel(interaction.guild));
+  }
+  if (interaction.isButton() && action === 'close') {
+    return interaction.update({ embeds: [baseEmbed({ title: `${emoji(interaction.guild, 'eco_coin')} Economia`, description: 'Painel fechado. Todas as alterações já estão salvas.' })], components: [] });
   }
   if (interaction.isButton() && ['rewards', 'currency'].includes(action)) {
     const config = getEconomyConfig(interaction.guild.id);

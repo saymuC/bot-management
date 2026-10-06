@@ -37,7 +37,7 @@ test('extrato é privado, limitado e acompanha compra e saldo real', async () =>
   const i = interaction();
   await command.execute(i);
   const embed = i.calls[0].embeds[0].toJSON();
-  assert.equal(embed.description.split('\n').length, 10);
+  assert.equal(embed.fields.length, 10);
   assert.equal(getTransactions(GUILD, USER, 10).length, 10);
   assert.match(embed.footer.text, /862/);
   const other = interaction('outro');
