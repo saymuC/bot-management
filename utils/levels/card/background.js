@@ -30,6 +30,81 @@ const DEFAULT_COLORS = resolveVisual(undefined).colors;
  */
 const BACKGROUND_TTL_MS = 60 * 60 * 1000;
 const BACKGROUND_MAX_ENTRIES = 24;
+const MAX_BACKGROUND_SIDE = 8192;
+const MAX_BACKGROUND_PIXELS = 16_000_000;
+
+/** Reject unsupported or oversized images before handing bytes to the native decoder. */
+function safeBackgroundImage(bytes) {
+  if (!Buffer.isBuffer(bytes)) return false;
+  let width = 0;
+  let height = 0;
+  if (bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) {
+    if (bytes.length < 33 || bytes.toString('ascii', 12, 16) !== 'IHDR') return false;
+    width = bytes.readUInt32BE(16);
+    height = bytes.readUInt32BE(20);
+    for (let pos = 8; pos + 12 <= bytes.length;) {
+      const size = bytes.readUInt32BE(pos);
+      if (size > bytes.length - pos - 12) return false;
+      if (bytes.toString('ascii', pos + 4, pos + 8) === 'acTL') return false;
+      pos += size + 12;
+    }
+  } else if (['GIF87a', 'GIF89a'].includes(bytes.toString('ascii', 0, 6)) && bytes.length >= 13) {
+    width = bytes.readUInt16LE(6);
+    height = bytes.readUInt16LE(8);
+    let pos = 13 + (bytes[10] & 0x80 ? 3 * (1 << ((bytes[10] & 7) + 1)) : 0);
+    let frames = 0;
+    while (pos < bytes.length) {
+      const marker = bytes[pos++];
+      if (marker === 0x3b) break;
+      if (marker === 0x2c) {
+        if (++frames > 1 || pos + 9 > bytes.length) return false;
+        const packed = bytes[pos + 8];
+        pos += 9 + (packed & 0x80 ? 3 * (1 << ((packed & 7) + 1)) : 0);
+        if (pos >= bytes.length) return false;
+        pos += 1; // LZW minimum code size
+      } else if (marker === 0x21) {
+        pos += 1; // extension label
+      } else return false;
+      while (pos < bytes.length) {
+        const size = bytes[pos++];
+        if (!size) break;
+        pos += size;
+      }
+    }
+    if (frames !== 1 || bytes[pos - 1] !== 0x3b) return false;
+  } else if (bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') {
+    if (bytes.length < 30) return false;
+    const kind = bytes.toString('ascii', 12, 16);
+    if (kind === 'VP8X') {
+      if (bytes[20] & 0x02) return false;
+      width = bytes.readUIntLE(24, 3) + 1;
+      height = bytes.readUIntLE(27, 3) + 1;
+    } else if (kind === 'VP8L' && bytes[20] === 0x2f) {
+      const bits = bytes.readUInt32LE(21);
+      width = (bits & 0x3fff) + 1;
+      height = ((bits >>> 14) & 0x3fff) + 1;
+    } else if (kind === 'VP8 ' && bytes[23] === 0x9d && bytes[24] === 0x01 && bytes[25] === 0x2a) {
+      width = bytes.readUInt16LE(26) & 0x3fff;
+      height = bytes.readUInt16LE(28) & 0x3fff;
+    }
+  } else if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+    for (let pos = 2; pos + 4 <= bytes.length;) {
+      if (bytes[pos] !== 0xff) return false;
+      const marker = bytes[pos + 1];
+      if (marker === 0xd9 || marker === 0xda) break;
+      const size = bytes.readUInt16BE(pos + 2);
+      if (size < 2 || pos + 2 + size > bytes.length) return false;
+      if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) {
+        if (size < 7) return false;
+        height = bytes.readUInt16BE(pos + 5);
+        width = bytes.readUInt16BE(pos + 7);
+        break;
+      }
+      pos += size + 2;
+    }
+  }
+  return width > 0 && height > 0 && width <= MAX_BACKGROUND_SIDE && height <= MAX_BACKGROUND_SIDE && width * height <= MAX_BACKGROUND_PIXELS;
+}
 
 /** @type {ReturnType<typeof createCache<CanvasImage|null>>} */
 const backgroundCache = createCache({ ttlMs: BACKGROUND_TTL_MS, max: BACKGROUND_MAX_ENTRIES });
@@ -57,6 +132,7 @@ async function loadBackgroundImage(url, deps = {}) {
   try {
     const result = await fetcher(url, { maxBytes: MAX_BACKGROUND_BYTES });
     if (!result.ok) return backgroundCache.set(url, null);
+    if (!safeBackgroundImage(result.bytes)) return backgroundCache.set(url, null);
     return backgroundCache.set(url, await decoder(result.bytes));
   } catch (err) {
     const motivo = err instanceof Error ? err.message : String(err);

@@ -5,7 +5,7 @@ Bot de gerenciamento com tickets, moderação, **AutoMod configurável**, **nív
 ## Setup
 
 1. Crie a aplicação em https://discord.com/developers/applications, ative os **Privileged Gateway Intents**: `SERVER MEMBERS` e `MESSAGE CONTENT` (este é obrigatório: é como o AutoMod lê o conteúdo das mensagens e como o `/config-emojis` lê o emoji que você manda no chat).
-2. Copie `.env.example` para `.env` e preencha `DISCORD_TOKEN`, `CLIENT_ID` e (opcional) `GUILD_ID` para testes.
+2. Copie `.env.example` para `.env` e preencha `DISCORD_TOKEN`, `CLIENT_ID`, `OWNER_ID` (necessário para `/bot-status`) e (opcional) `GUILD_ID` para testes.
 3. Registre os comandos e inicie:
 
 ```bash
@@ -25,6 +25,8 @@ O banco é um arquivo único. Onde ele fica é a única coisa que muda de host p
 | Variável | Vazio | Preenchido |
 | --- | --- | --- |
 | `DATABASE_PATH` | `database/bot.sqlite` | o caminho indicado (a pasta é criada se faltar) |
+
+Em sistemas POSIX, pastas criadas pelo bot usam modo `0700` e o banco usa `0600` (inclusive arquivos existentes; a `umask` pode restringir pastas novas ainda mais). Proteja o diretório escolhido e seus backups. No Windows, use ACLs do sistema. Acesso ao diretório também controla os arquivos auxiliares SQLite (`-wal` e `-shm`). Não inclua bancos ou backups em commits; `.gitignore` ignora `*.sqlite` e seus arquivos auxiliares.
 
 Em qualquer host que publique por **upload** (Discloud) ou por **imagem** (Docker, Render), a pasta do código é substituída no deploy. Se o banco morar nela, todo servidor volta ao zero — níveis, tickets, avisos, configurações. Aponte `DATABASE_PATH` para fora do envio (Discloud) ou para um volume persistente (Docker).
 
@@ -123,7 +125,7 @@ São 40 comandos. A coluna **Permissão** é a exigência padrão do Discord par
 | `/ticket-config` | Painel dos tickets — inclui o canal de logs exclusivo (transcripts e avaliações) | Administrador |
 | `/setup-verify` | Painel da verificação por captcha: canal, cargo e aparência do embed e do botão | Administrador |
 | `/pull-user usuario` | Readiciona ao servidor quem conectou a conta via OAuth | Administrador |
-| `/bot-status` | Painel do status e da atividade do bot (global) | Administrador |
+| `/bot-status` | Painel do status e da atividade do bot (global) | Dono configurado em `OWNER_ID` |
 | `/config-emojis` | Painel para trocar os emojis usados pelo bot | Administrador |
 | `/emoji-add emoji arquivo nome` | Importa um emoji de outro servidor, de um ID ou de uma imagem | Gerenciar expressões |
 
@@ -207,7 +209,7 @@ O degrau só vale **na infração que o cruza**. Nesta escada, quem vai de 6 par
 
 **Uma punição por evento.** Quando a ação imediata da regra e o degrau caem na mesma mensagem, aplica-se **a mais grave** das duas (`nenhuma` < `advertir` < `silenciar` < `expulsar` < `banir`); empatando em `silenciar`, vale o timeout mais longo. Advertir *e* silenciar pela mesma mensagem seria punir duas vezes pelo mesmo fato. A consequência prática: quando a escada absorve um `Advertir`, **nenhum warn é gravado**, então aquele evento não aparece no `/warnings` — ele aparece no `/infractions`, e o log do AutoMod diz que a ação da regra foi absorvida.
 
-Pontos vencem — 7 dias por padrão, ajustável no mesmo modal — e vencer significa **sair da soma, não ser apagado**: o `/infractions` continua mostrando a linha marcada com ⏳. A soma é feita no banco, sem teto de linhas: um reincidente com 250 infrações soma 250, não 200.
+Pontos vencem — 7 dias por padrão, ajustável no mesmo modal — e vencer significa **sair da soma, não ser apagado imediatamente**: o `/infractions` mostra as linhas vencidas até a limpeza por retenção. A soma é feita no banco, sem teto de linhas: um reincidente com 250 infrações soma 250, não 200.
 
 `/infractions @usuario` mostra pontos válidos, total de infrações, quando vencem, o degrau atual (o mais alto alcançado, não o último cruzado), o próximo degrau e as 10 últimas linhas.
 
@@ -257,6 +259,12 @@ Fora das isenções, o AutoMod vale em **todo** canal que o bot consegue ver. A 
 ### Log
 
 O select de canal na tela inicial define onde ficam os registros do AutoMod. Sem ele, tudo cai no canal de `/setup-logs`.
+
+### Privacidade e retenção
+
+O AutoMod armazena regra, pontos, motivo curto, IDs e data no SQLite; mensagens barradas não são copiadas integralmente para a coluna de trecho nem para o embed do log. `AUTOMOD_RETENTION_DAYS` controla a limpeza das infrações (padrão `90`, `0` desliga): no início do processo e depois uma vez ao dia, remove somente linhas mais antigas que **ambos** o prazo de retenção e a janela de pontos vigente no servidor. Datas ausentes/ilegíveis não são removidas automaticamente; a limpeza manual em `/infractions` continua disponível. Configure a retenção conforme sua obrigação legal antes de ativar o bot. Logs e avisos enviados ao Discord, assim como registros independentes em `/warnings`, não são apagados por essa limpeza.
+
+Transcripts de tickets são gerados em memória no encerramento e anexados ao canal de logs do Discord. `TRANSCRIPT_RETENTION_DAYS` (padrão `30`, `0` inclui todo o histórico disponível) limita **quais mensagens entram em novos anexos**, além do limite de 500 mensagens; não apaga anexos já enviados. O bot não tem controle confiável sobre cópias, encaminhamentos ou backups no Discord. Restrinja o acesso aos canais de logs e estabeleça um procedimento próprio para apagar mensagens/anexos antigos no Discord e em backups quando necessário; desative a opção de transcript no painel se não puder mantê-los com segurança. Variáveis de retenção aceitam inteiros de 0 a 36500; valores inválidos impedem o início da funcionalidade.
 
 > Os comandos `/automod`, `/infractions` e `/automod-test` são novos: rode `npm run deploy` depois de atualizar, senão eles não aparecem no Discord.
 
@@ -446,13 +454,13 @@ Erro em produção é registrado numa linha só de JSON, com contexto: servidor,
 
 `/health` (Gerenciar servidor, resposta efêmera) mostra o retrato do processo: uptime, memória (heap e RSS), latência do gateway, servidores, membros somados e canais em cache, o total de erros por escopo e os últimos 10 registrados.
 
-O mesmo retrato sai em JSON por HTTP quando você define `HEALTH_PORT` no `.env`:
+O endpoint HTTP só expõe `{"ready":true}` ou `{"ready":false}` quando você define `HEALTH_PORT` no `.env`:
 
 ```bash
 curl http://localhost:3001/health
 ```
 
-Responde **200** com o gateway conectado e **503** sem ele — é o que um orquestrador (Docker, Render, uptime monitor) usa para decidir reiniciar, já que o processo pode estar vivo com o bot sem atender ninguém. `HEALTH_PORT` vazio desliga só o endpoint HTTP; o `/health` no Discord continua valendo.
+Responde **200** com o gateway conectado e **503** sem ele. Por padrão escuta somente em `127.0.0.1`; defina `HEALTH_HOST=0.0.0.0` somente se o monitor precisar acessar de fora do host/container. `HEALTH_PORT` vazio desliga só o endpoint HTTP; o `/health` no Discord continua valendo.
 
 ### Memória em vários servidores
 
@@ -462,7 +470,7 @@ Nada depende de cache de membro quente: quem precisa de um membro faz `members.f
 
 ## Status do bot
 
-`/bot-status` abre um painel com rascunho: você monta o status, vê o preview e só então confirma. É uma configuração **global** (vale para o bot inteiro, não por servidor) e fica salva no banco, então sobrevive a reinícios.
+`/bot-status` abre um painel com rascunho: você monta o status, vê o preview e só então confirma. É uma configuração **global** (vale para o bot inteiro, não por servidor) e fica salva no banco, então sobrevive a reinícios. Apenas o usuário com ID válido em `OWNER_ID` pode usar o comando e os componentes/modais de painéis antigos; sem esse ID, ninguém pode alterar o status. O gate geral de comandos ainda exige permissão para abrir o comando no servidor.
 
 Dá para escolher a bolinha (online, ausente, não perturbe, invisível) e o tipo de atividade: nenhuma, personalizado, jogando, assistindo, ouvindo, competindo em e **transmitindo** — este último deixa o bot roxo e o título clicável, mas o Discord exige uma URL de Twitch ou YouTube (qualquer outro domínio é ignorado, inclusive `discord.gg`).
 

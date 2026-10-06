@@ -52,7 +52,7 @@ const { detectors: words } = require('../utils/automod/detectors/words');
 const { detectors: flood } = require('../utils/automod/detectors/flood');
 const { detectors: links, extractDomains, extractInviteCodes, matchesDomain, linkifiable } =
   require('../utils/automod/detectors/links');
-const { ladderStep, crossedStep } = require('../utils/automod/infractions');
+const { ladderStep, crossedStep, toSqlDate } = require('../utils/automod/infractions');
 const { pickAction, noticeText, canNotify, NOTICE_COOLDOWN_MS } = require('../utils/automod/enforce');
 const { parseDuration, parseLadderLine, isInert, idleReason } = require('../handlers/automodSetupHandler');
 const {
@@ -862,4 +862,52 @@ test('activePoints soma sem teto de linhas', async (t) => {
 
   assert.equal(activePoints(guildId, userId, 168), 250);
   assert.equal(activePoints(guildId, userId, 0), 250);
+});
+
+test('retenção remove apenas infrações além da janela de pontos', (t) => {
+  const { db } = require('../database/db');
+  const { recordInfraction, activePoints, countInfractions, clearInfractions, purgeExpiredInfractions } =
+    require('../utils/automod/infractions');
+  const guildId = 'test-automod-retention';
+  const userId = 'test-retention';
+  clearInfractions(guildId, userId);
+  t.after(() => clearInfractions(guildId, userId));
+  const now = Date.now();
+  const old = recordInfraction({ guildId, userId, ruleKey: 'caps', points: 1, excerpt: 'x'.repeat(300) });
+  db.prepare('UPDATE automod_infractions SET created_at = ? WHERE id = ?')
+    .run(toSqlDate(now - 100 * 86_400_000), old);
+  const active = recordInfraction({ guildId, userId, ruleKey: 'caps', points: 2, excerpt: 'x'.repeat(300) });
+  const recentlyExpired = recordInfraction({ guildId, userId, ruleKey: 'caps', points: 3 });
+  db.prepare('UPDATE automod_infractions SET created_at = ? WHERE id = ?')
+    .run(toSqlDate(now - 8 * 86_400_000), recentlyExpired);
+  const undated = recordInfraction({ guildId, userId, ruleKey: 'caps', points: 0 });
+  db.prepare('UPDATE automod_infractions SET created_at = ? WHERE id = ?').run('invalid', undated);
+  const row = db.prepare('SELECT excerpt FROM automod_infractions WHERE id = ?').get(active);
+  assert.ok(row.excerpt.length <= 120);
+  if (process.env.AUTOMOD_RETENTION_DAYS === undefined) {
+    assert.equal(purgeExpiredInfractions(now), 1);
+    assert.equal(countInfractions(guildId, userId), 3);
+    assert.equal(activePoints(guildId, userId, 168, now), 2);
+  }
+});
+
+test('retenção nunca remove pontos ativos quando a janela supera a retenção', (t) => {
+  if (process.env.AUTOMOD_RETENTION_DAYS !== undefined) return;
+  const { db, setGuildConfig } = require('../database/db');
+  const { recordInfraction, activePoints, clearInfractions, purgeExpiredInfractions } =
+    require('../utils/automod/infractions');
+  const guildId = 'test-automod-long-window';
+  const userId = 'test-long-window';
+  clearInfractions(guildId, userId);
+  setGuildConfig(guildId, 'automod_config', JSON.stringify({ pointsExpireHours: 24 * 365 }));
+  t.after(() => {
+    clearInfractions(guildId, userId);
+    db.prepare('DELETE FROM guild_config WHERE guild_id = ?').run(guildId);
+  });
+  const now = Date.now();
+  const id = recordInfraction({ guildId, userId, ruleKey: 'caps', points: 4 });
+  db.prepare('UPDATE automod_infractions SET created_at = ? WHERE id = ?')
+    .run(toSqlDate(now - 100 * 86_400_000), id);
+  purgeExpiredInfractions(now);
+  assert.equal(activePoints(guildId, userId, 24 * 365, now), 4);
 });

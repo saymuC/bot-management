@@ -4,15 +4,21 @@
  * Cada violação grava uma linha em `automod_infractions` com os pontos da regra.
  * A soma dos pontos **não vencidos** decide se um degrau da escada foi cruzado.
  *
- * Linhas nunca são apagadas por expiração: o ponto vencido só sai da soma. Assim
- * o `/infractions` continua mostrando o histórico inteiro do membro, que é o que
- * um moderador quer ver antes de decidir algo manualmente.
+ * A expiração tira pontos da soma; a retenção remove apenas linhas antigas
+ * cujos pontos também já venceram.
  */
 
 const { db } = require('../../database/db');
+const { getAutomodConfig } = require('./config');
 
 /** Quanto do texto original fica guardado junto da infração. */
-const MAX_EXCERPT = 300;
+const MAX_EXCERPT = 120;
+const retentionSetting = process.env.AUTOMOD_RETENTION_DAYS;
+const RETENTION_DAYS = retentionSetting === undefined ? 90 : Number(retentionSetting);
+if ((retentionSetting !== undefined && !/^\d+$/.test(retentionSetting)) ||
+    !Number.isSafeInteger(RETENTION_DAYS) || RETENTION_DAYS > 36500) {
+  throw new Error('AUTOMOD_RETENTION_DAYS deve ser um inteiro entre 0 e 36500');
+}
 
 const insertStmt = db.prepare(
   `INSERT INTO automod_infractions
@@ -32,6 +38,11 @@ const countStmt = db.prepare(
 );
 
 const clearStmt = db.prepare('DELETE FROM automod_infractions WHERE guild_id = ? AND user_id = ?');
+const guildsStmt = db.prepare('SELECT DISTINCT guild_id FROM automod_infractions');
+const purgeStmt = db.prepare(
+  `DELETE FROM automod_infractions WHERE guild_id = ? AND created_at < ?
+   AND created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]'`
+);
 
 /**
  * Soma no banco, não em JS: carregar as linhas para somar impunha um teto (eram
@@ -83,6 +94,23 @@ const countInfractions = (guildId, userId) => countStmt.get(guildId, userId).tot
 
 /** Apaga o histórico de um membro (usado pelo `/infractions limpar`). */
 const clearInfractions = (guildId, userId) => clearStmt.run(guildId, userId).changes;
+
+/** 0 desliga a retenção; pontos sem expiração nunca são removidos. */
+function purgeExpiredInfractions(now = Date.now()) {
+  if (!RETENTION_DAYS) return 0;
+  const cutoff = now - RETENTION_DAYS * 86_400_000;
+  let removed = 0;
+  for (const { guild_id: guildId } of guildsStmt.all()) {
+    const hours = getAutomodConfig(guildId).pointsExpireHours;
+    if (!(hours > 0)) continue;
+    removed += purgeStmt.run(guildId, toSqlDate(Math.min(cutoff, now - hours * 3_600_000))).changes;
+  }
+  return removed;
+}
+
+// Uma limpeza no boot e depois diariamente; nunca atrasa o encerramento do processo.
+purgeExpiredInfractions();
+setInterval(purgeExpiredInfractions, 86_400_000).unref();
 
 /**
  * Soma dos pontos ainda válidos. Conta **todas** as infrações do membro, sem teto.
@@ -139,6 +167,7 @@ module.exports = {
   listInfractions,
   countInfractions,
   clearInfractions,
+  purgeExpiredInfractions,
   activePoints,
   ladderStep,
   crossedStep,

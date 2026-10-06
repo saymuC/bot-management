@@ -9,6 +9,8 @@
  */
 
 const dns = require('node:dns').promises;
+const https = require('node:https');
+const net = require('node:net');
 
 const MAX_REDIRECTS = 3;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -55,7 +57,8 @@ function ipv4ToInt(ip) {
  * @returns {boolean}
  */
 function isPrivateIp(ip) {
-  const addr = String(ip).trim().toLowerCase().replace(/^\[|\]$/g, '').split('%')[0];
+  const addr = String(ip).trim().toLowerCase().replace(/^\[|\]$/g, '');
+  if (addr.includes('%')) return true;
 
   // `::ffff:1.2.3.4` e `::1.2.3.4` são um IPv4 escrito em IPv6 — vale a mesma tabela.
   const mapped = /^::(?:ffff:)?(\d+\.\d+\.\d+\.\d+)$/.exec(addr);
@@ -67,18 +70,13 @@ function isPrivateIp(ip) {
     });
   }
 
-  if (!addr.includes(':')) return true;
-  if (addr === '::' || addr === '::1') return true;
-  if (addr.startsWith('64:ff9b:')) return true; // NAT64: embrulha um IPv4 qualquer
-
-  const first = Number.parseInt(addr.split(':')[0] || '0', 16);
-  if (!Number.isFinite(first)) return true;
-  if ((first >> 8) === 0xfc || (first >> 8) === 0xfd) return true; // fc00::/7 (uso local)
-  if ((first & 0xffc0) === 0xfe80) return true; // fe80::/10 (link-local)
-  if ((first & 0xffc0) === 0xfec0) return true; // fec0::/10 (site-local, obsoleto mas ainda roteado)
-  if ((first & 0xff00) === 0xff00) return true; // ff00::/8 (multicast)
-
-  return false;
+  if (net.isIP(addr) !== 6) return true;
+  // Apenas unicast global nativo; túneis (6to4/Teredo) e prefixos especiais
+  // podem encapsular um IPv4 privado mesmo com um endereço IPv6 público.
+  const groups = addr.split(':');
+  const first = Number.parseInt(groups[0], 16);
+  const second = Number.parseInt(groups[1], 16);
+  return (first & 0xe000) !== 0x2000 || (first === 0x2001 && (second === 0 || second === 0xdb8)) || first === 0x2002;
 }
 
 /**
@@ -88,12 +86,8 @@ function isPrivateIp(ip) {
  * para `127.0.0.1` ou para o metadata da cloud. Aqui a resolução acontece antes
  * de qualquer byte sair.
  *
- * ponytail: sobra a janela de DNS rebinding (o `fetch` resolve de novo por
- * conta dele). Fechar de verdade exige conectar no IP já validado com o Host
- * original — trocar por um agente customizado se isso virar requisito.
- *
  * @param {URL} url
- * @returns {Promise<{ok: true} | {ok: false, error: string}>}
+ * @returns {Promise<{ok: true, address: string, family: number} | {ok: false, error: string}>}
  */
 async function checkResolvedHost(url) {
   let addresses;
@@ -107,7 +101,21 @@ async function checkResolvedHost(url) {
     return { ok: false, error: 'Esse endereço não é público. Use um link de imagem normal.' };
   }
 
-  return { ok: true };
+  return { ok: true, address: addresses[0].address, family: addresses[0].family };
+}
+
+/** @param {URL} url @param {{address: string, family: number}} resolved */
+function requestPinned(url, resolved) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, {
+      agent: false,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      // O hostname da URL continua sendo usado para Host, SNI e certificado.
+      // O socket nunca consulta DNS outra vez, inclusive depois de um redirect.
+      lookup: (_host, _options, callback) => callback(null, resolved.address, resolved.family),
+    }, resolve);
+    req.once('error', reject);
+  });
 }
 
 /**
@@ -117,7 +125,7 @@ async function checkResolvedHost(url) {
  * inteiro na memória só para rejeitá-lo depois — o limite de tamanho não
  * protegeria nada contra quem manda um arquivo de gigabytes.
  *
- * @param {Response} res
+ * @param {{body: AsyncIterable<Uint8Array>|null}} res
  * @param {number} maxBytes
  * @returns {Promise<{ok: true, bytes: Buffer} | {ok: false, seen: number}>}
  */
@@ -170,8 +178,8 @@ function checkPublicUrl(raw) {
 /**
  * Baixa a imagem validando destino, tipo e tamanho **em cada redirecionamento**.
  *
- * Redirecionamento é seguido à mão de propósito: com `redirect: 'follow'` o
- * `fetch` levaria o bot a um endereço interno sem passar por `checkPublicUrl` de
+ * Redirecionamento é seguido à mão de propósito: seguir automaticamente
+ * levaria o bot a um endereço interno sem passar por `checkPublicUrl` de
  * novo, e a checagem da primeira URL não valeria nada.
  *
  * @param {string} url
@@ -193,41 +201,46 @@ async function fetchRemoteImage(url, { maxBytes, tooLarge, notFound }) {
 
     let res;
     try {
-      res = await fetch(checked.url, {
-        redirect: 'manual',
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
+      res = await requestPinned(checked.url, resolved);
     } catch (err) {
-      const cause = err instanceof Error ? (err.name === 'TimeoutError' ? 'tempo esgotado' : err.message) : String(err);
+      const cause = err instanceof Error ? (err.name === 'AbortError' || err.name === 'TimeoutError' ? 'tempo esgotado' : err.message) : String(err);
       return { ok: false, error: `Não consegui baixar a imagem (${cause}).` };
     }
 
-    if (res.status >= 300 && res.status < 400) {
-      const location = res.headers.get('location');
+    if (res.statusCode >= 300 && res.statusCode < 400) {
+      const location = res.headers.location;
+      res.destroy();
       if (!location) return { ok: false, error: 'O link redirecionou para lugar nenhum.' };
-      current = new URL(location, checked.url).toString();
+      try { current = new URL(location, checked.url).toString(); }
+      catch { return { ok: false, error: 'O link redirecionou para uma URL inválida.' }; }
       continue;
     }
 
-    if (!res.ok) {
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      res.destroy();
       return {
         ok: false,
-        error: res.status === 404 ? (notFound ?? 'Imagem não encontrada nesse link.') : `O servidor da imagem respondeu ${res.status}.`,
+        error: res.statusCode === 404 ? (notFound ?? 'Imagem não encontrada nesse link.') : `O servidor da imagem respondeu ${res.statusCode}.`,
       };
     }
 
-    const contentType = String(res.headers.get('content-type') ?? '').toLowerCase();
-    if (!contentType.startsWith('image/')) return { ok: false, error: 'Esse link não aponta para uma imagem.' };
+    const contentType = String(res.headers['content-type'] ?? '').toLowerCase();
+    if (!contentType.startsWith('image/')) {
+      res.destroy();
+      return { ok: false, error: 'Esse link não aponta para uma imagem.' };
+    }
 
     // O `content-length` é conferido antes de ler o corpo: é o que evita puxar
     // um arquivo enorme só para descobrir depois que ele não serve.
-    const declared = Number(res.headers.get('content-length'));
+    const declared = Number(res.headers['content-length']);
     if (Number.isFinite(declared) && declared > maxBytes) {
+      res.destroy();
       return { ok: false, error: tooLargeMessage(Math.round(declared / 1024)) };
     }
 
     // Sem `content-length` (ou com um mentiroso), o corte real acontece aqui.
-    const body = await readCapped(res, maxBytes).catch(() => null);
+    const body = await readCapped({ body: res }, maxBytes).catch(() => null);
+    res.destroy();
     if (!body) return { ok: false, error: 'Não consegui baixar a imagem (conexão interrompida).' };
     if (!body.ok) return { ok: false, error: tooLargeMessage(Math.round(body.seen / 1024)) };
 

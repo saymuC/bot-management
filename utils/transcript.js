@@ -2,6 +2,12 @@ const { AttachmentBuilder } = require('discord.js');
 
 const MAX_MESSAGES = 500;
 const PAGE_SIZE = 100;
+const retentionSetting = process.env.TRANSCRIPT_RETENTION_DAYS;
+const RETENTION_DAYS = retentionSetting === undefined ? 30 : Number(retentionSetting);
+if ((retentionSetting !== undefined && !/^\d+$/.test(retentionSetting)) ||
+    !Number.isSafeInteger(RETENTION_DAYS) || RETENTION_DAYS > 36500) {
+  throw new Error('TRANSCRIPT_RETENTION_DAYS deve ser um inteiro entre 0 e 36500');
+}
 
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
@@ -17,6 +23,7 @@ function escapeHtml(value) {
 async function fetchChannelHistory(channel, max = MAX_MESSAGES) {
   const collected = [];
   let before;
+  const cutoff = RETENTION_DAYS ? Date.now() - RETENTION_DAYS * 86_400_000 : -Infinity;
 
   while (collected.length < max) {
     const batch = await channel.messages.fetch({
@@ -25,9 +32,9 @@ async function fetchChannelHistory(channel, max = MAX_MESSAGES) {
     });
     if (batch.size === 0) break;
 
-    collected.push(...batch.values());
+    collected.push(...[...batch.values()].filter((message) => message.createdTimestamp >= cutoff));
     before = batch.last().id;
-    if (batch.size < PAGE_SIZE) break;
+    if (batch.size < PAGE_SIZE || batch.last().createdTimestamp < cutoff) break;
   }
 
   return collected.reverse();
