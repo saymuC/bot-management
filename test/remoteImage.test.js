@@ -8,6 +8,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { Readable } = require('node:stream');
 const dns = require('node:dns').promises;
+const https = require('node:https');
+const { EventEmitter } = require('node:events');
 
 const { fetchRemoteImage, isPrivateIp, readCapped } = require('../utils/remoteImage');
 
@@ -31,6 +33,10 @@ test('isPrivateIp barra loopback, rede local, link-local e CGNAT', () => {
     'ff02::1', // multicast (all-nodes)
     'ff05::1:3',
     '64:ff9b::7f00:1',
+    '::ffff:7f00:1',
+    '2002:7f00:1::1',
+    '2001:0::1',
+    '2001:db8::1',
     '::ffff:127.0.0.1', // IPv4 disfarçado de IPv6
   ]) {
     assert.equal(isPrivateIp(ip), true, `${ip} deveria ser bloqueado`);
@@ -44,7 +50,7 @@ test('isPrivateIp libera endereços públicos', () => {
 });
 
 test('isPrivateIp bloqueia o que não sabe ler', () => {
-  for (const ip of ['', 'nao-e-ip', '1.2.3', '999.1.1.1', '1.2.3.4.5']) {
+  for (const ip of ['', 'nao-e-ip', '1.2.3', '999.1.1.1', '1.2.3.4.5', 'abcd:::1']) {
     assert.equal(isPrivateIp(ip), true, `${JSON.stringify(ip)} deveria ser bloqueado`);
   }
 });
@@ -86,18 +92,29 @@ test('readCapped aceita resposta sem corpo', async () => {
   assert.equal(result.bytes.length, 0);
 });
 
-const headers = (values) => ({ get: (name) => values[name.toLowerCase()] ?? null });
 const image = (body = ['img'], extra = {}) => ({
-  ok: true,
-  status: 200,
-  headers: headers({ 'content-type': 'image/png', ...extra.headers }),
-  body: Readable.from(body),
+  statusCode: 200,
+  headers: { 'content-type': 'image/png', ...extra.headers },
+  body,
 });
 
-test('fetchRemoteImage barra DNS privado antes do fetch', async (t) => {
+function mockRequest(t, respond) {
+  t.mock.method(https, 'get', (url, options, callback) => {
+    const req = new EventEmitter();
+    const response = respond(url, options);
+    req.destroy = () => {};
+    process.nextTick(() => callback(Object.assign(Readable.from(response.body ?? []), {
+      statusCode: response.statusCode,
+      headers: response.headers,
+    })));
+    return req;
+  });
+}
+
+test('fetchRemoteImage barra DNS privado antes da conexão', async (t) => {
   let fetched = false;
   t.mock.method(dns, 'lookup', async () => [{ address: '127.0.0.1', family: 4 }]);
-  t.mock.method(global, 'fetch', async () => { fetched = true; });
+  mockRequest(t, () => { fetched = true; return image(); });
 
   const result = await fetchRemoteImage('https://cdn.example/a.png', { maxBytes: 10 });
 
@@ -108,7 +125,7 @@ test('fetchRemoteImage barra DNS privado antes do fetch', async (t) => {
 
 test('fetchRemoteImage revalida redirecionamento para rede interna', async (t) => {
   t.mock.method(dns, 'lookup', async (host) => [{ address: host === 'safe.example' ? '1.1.1.1' : '10.0.0.1', family: 4 }]);
-  t.mock.method(global, 'fetch', async () => ({ ok: false, status: 302, headers: headers({ location: 'https://evil.example/a.png' }) }));
+  mockRequest(t, () => ({ statusCode: 302, headers: { location: 'https://evil.example/a.png' } }));
 
   const result = await fetchRemoteImage('https://safe.example/a.png', { maxBytes: 10 });
 
@@ -119,9 +136,9 @@ test('fetchRemoteImage revalida redirecionamento para rede interna', async (t) =
 test('fetchRemoteImage limita redirects e aceita URL relativa segura', async (t) => {
   let calls = 0;
   t.mock.method(dns, 'lookup', async () => [{ address: '1.1.1.1', family: 4 }]);
-  t.mock.method(global, 'fetch', async () => {
+  mockRequest(t, () => {
     calls += 1;
-    return { ok: false, status: 302, headers: headers({ location: '/next.png' }) };
+    return { statusCode: 302, headers: { location: '/next.png' } };
   });
 
   const result = await fetchRemoteImage('https://safe.example/a.png', { maxBytes: 10 });
@@ -133,32 +150,52 @@ test('fetchRemoteImage limita redirects e aceita URL relativa segura', async (t)
 
 test('fetchRemoteImage cobre timeout, MIME inválido e 404', async (t) => {
   t.mock.method(dns, 'lookup', async () => [{ address: '1.1.1.1', family: 4 }]);
-  t.mock.method(global, 'fetch', async () => { throw Object.assign(new Error('late'), { name: 'TimeoutError' }); });
+  t.mock.method(https, 'get', () => { throw Object.assign(new Error('late'), { name: 'TimeoutError' }); });
   assert.match((await fetchRemoteImage('https://safe.example/a.png', { maxBytes: 10 })).error, /tempo esgotado/);
 
   t.mock.reset();
   t.mock.method(dns, 'lookup', async () => [{ address: '1.1.1.1', family: 4 }]);
-  t.mock.method(global, 'fetch', async () => ({ ok: true, status: 200, headers: headers({ 'content-type': 'text/html' }), body: Readable.from(['x']) }));
+  mockRequest(t, () => ({ statusCode: 200, headers: { 'content-type': 'text/html' } }));
   assert.match((await fetchRemoteImage('https://safe.example/a.png', { maxBytes: 10 })).error, /imagem/);
 
   t.mock.reset();
   t.mock.method(dns, 'lookup', async () => [{ address: '1.1.1.1', family: 4 }]);
-  t.mock.method(global, 'fetch', async () => ({ ok: false, status: 404, headers: headers({}), body: null }));
+  mockRequest(t, () => ({ statusCode: 404, headers: {} }));
   assert.match((await fetchRemoteImage('https://safe.example/a.png', { maxBytes: 10 })).error, /não encontrada/);
 });
 
 test('fetchRemoteImage confere content-length e corta stream mentiroso/interrompido', async (t) => {
   t.mock.method(dns, 'lookup', async () => [{ address: '1.1.1.1', family: 4 }]);
-  t.mock.method(global, 'fetch', async () => image([], { headers: { 'content-length': '99' } }));
+  mockRequest(t, () => image([], { headers: { 'content-length': '99' } }));
   assert.match((await fetchRemoteImage('https://safe.example/a.png', { maxBytes: 10 })).error, /limite/);
 
   t.mock.reset();
   t.mock.method(dns, 'lookup', async () => [{ address: '1.1.1.1', family: 4 }]);
-  t.mock.method(global, 'fetch', async () => image([Buffer.alloc(6), Buffer.alloc(6)], { headers: { 'content-length': '1' } }));
+  mockRequest(t, () => image([Buffer.alloc(6), Buffer.alloc(6)], { headers: { 'content-length': '1' } }));
   assert.match((await fetchRemoteImage('https://safe.example/a.png', { maxBytes: 10 })).error, /limite/);
 
   t.mock.reset();
   t.mock.method(dns, 'lookup', async () => [{ address: '1.1.1.1', family: 4 }]);
-  t.mock.method(global, 'fetch', async () => image((async function* () { throw new Error('boom'); })()));
+  mockRequest(t, () => image((async function* () { throw new Error('boom'); })()));
   assert.match((await fetchRemoteImage('https://safe.example/a.png', { maxBytes: 10 })).error, /interrompida/);
+});
+
+test('DNS rebind na conexão usa somente o IP validado e mantém SNI/Host', async (t) => {
+  let lookups = 0;
+  t.mock.method(dns, 'lookup', async () => {
+    lookups += 1;
+    return [{ address: lookups === 1 ? '1.1.1.1' : '127.0.0.1', family: 4 }];
+  });
+  mockRequest(t, (url, options) => {
+    assert.equal(url.hostname, 'safe.example');
+    assert.equal(options.agent, false);
+    options.lookup('safe.example', {}, (_err, address, family) => {
+      assert.equal(address, '1.1.1.1');
+      assert.equal(family, 4);
+    });
+    return image(['img']);
+  });
+  const result = await fetchRemoteImage('https://safe.example/a.png', { maxBytes: 10 });
+  assert.equal(result.ok, true);
+  assert.equal(lookups, 1);
 });

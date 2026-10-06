@@ -2,18 +2,21 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const { saveTokens, getTokens, forgetTokens, authorizedGuilds, hasEncryptionKey } = require('./tokenStore');
 
-// state -> guildId (anti-CSRF; expira em 10 min)
+// state -> guildId, userId (anti-CSRF; expira em 10 min)
 const pendingStates = new Map();
 const STATE_TTL_MS = 10 * 60 * 1000;
+const pendingRefreshes = new Map();
 
 // Renova antes de vencer de fato: um token que expira durante a requisição
 // devolve 401 e o usuário levaria a culpa de uma corrida de relógio.
 const REFRESH_MARGIN_MS = 60 * 1000;
 
-function createOAuthUrl(guildId) {
+function createOAuthUrl(guildId, userId) {
+  if (!guildId || !userId) throw new TypeError('OAuth requer guildId e userId');
   const { CLIENT_ID, OAUTH_REDIRECT_URI } = process.env;
   const state = crypto.randomBytes(16).toString('hex');
-  pendingStates.set(state, { guildId, expires: Date.now() + STATE_TTL_MS });
+  pendingStates.set(state, { guildId, userId, expires: Date.now() + STATE_TTL_MS });
+  setTimeout(() => pendingStates.delete(state), STATE_TTL_MS).unref();
 
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
@@ -92,6 +95,19 @@ async function fetchOAuthUser(accessToken) {
  * @returns {Promise<{ok: true, accessToken: string} | {ok: false, reason: string}>}
  */
 async function validAccessToken(userId, guildId) {
+  const key = JSON.stringify([userId, guildId]);
+  if (pendingRefreshes.has(key)) return pendingRefreshes.get(key);
+
+  const result = resolveAccessToken(userId, guildId);
+  pendingRefreshes.set(key, result);
+  try {
+    return await result;
+  } finally {
+    pendingRefreshes.delete(key);
+  }
+}
+
+async function resolveAccessToken(userId, guildId) {
   const stored = getTokens(userId, guildId);
   if (!stored) {
     return { ok: false, reason: 'Usuário nunca autorizou o bot via OAuth **neste servidor**.' };
@@ -107,6 +123,10 @@ async function validAccessToken(userId, guildId) {
   }
 
   const renewed = await refreshTokens(stored.refreshToken).catch(() => null);
+  const current = getTokens(userId, guildId);
+  if (current?.accessToken !== stored.accessToken || current?.refreshToken !== stored.refreshToken) {
+    return { ok: false, reason: 'Autorização alterada durante a renovação. Tente novamente.' };
+  }
   if (!renewed?.access_token) {
     // Refresh recusado significa autorização revogada do lado do Discord: a
     // cópia local só mentiria daqui para frente.
@@ -205,6 +225,12 @@ function startOAuthServer(client) {
 
       const token = await exchangeCode(code);
       const user = await fetchOAuthUser(token.access_token);
+      if (user.id !== pending.userId) {
+        await revokeAtDiscord(token.access_token, 'access_token');
+        res.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(htmlPage('Conta incorreta', 'Entre com a mesma conta que concluiu o captcha e tente novamente.'));
+        return;
+      }
       const expiresAt = new Date(Date.now() + token.expires_in * 1000).toISOString();
 
       saveTokens({

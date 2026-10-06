@@ -21,7 +21,16 @@ const file = process.env.DATABASE_PATH
 
 // A pasta pode não existir no primeiro boot do host novo; sem isto o
 // better-sqlite3 falha com SQLITE_CANTOPEN, que não diz o que está errado.
-fs.mkdirSync(path.dirname(file), { recursive: true });
+fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+
+// Cria sem depender do umask; bancos existentes também não devem ficar legíveis por outros usuários.
+try {
+  const fd = fs.openSync(file, 'wx', 0o600);
+  fs.closeSync(fd);
+} catch (err) {
+  if (err.code !== 'EEXIST') throw err;
+}
+if (process.platform !== 'win32') fs.chmodSync(file, 0o600);
 
 const db = new Database(file);
 db.pragma('journal_mode = WAL');
@@ -109,8 +118,8 @@ CREATE TABLE IF NOT EXISTS warns (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
--- Infrações do AutoMod. As linhas nunca são apagadas por expiração: os pontos
--- vencidos só ficam de fora da soma da escada, e o histórico segue consultável.
+-- Infrações do AutoMod. A expiração dos pontos não apaga linhas; a retenção
+-- separada só remove infrações antigas que já não contam para a escada.
 CREATE TABLE IF NOT EXISTS automod_infractions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   guild_id TEXT NOT NULL,

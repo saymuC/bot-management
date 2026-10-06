@@ -34,8 +34,8 @@ function response(status, body = {}) {
   return { ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(body), json: async () => body };
 }
 
-function stateFor(guildId = GUILD) {
-  const url = new URL(createOAuthUrl(guildId));
+function stateFor(guildId = GUILD, userId = USER) {
+  const url = new URL(createOAuthUrl(guildId, userId));
   return url.searchParams.get('state');
 }
 
@@ -109,7 +109,7 @@ test('state ausente, expirado ou de outra guild não grava autorização útil',
   assert.equal((await callback(server, expired)).status, 400);
 
   const other = stateFor(OTHER_GUILD);
-  assert.equal((await callback(server, other)).status, 500, 'users/@me falha porque o mock não devolve usuário');
+  assert.equal((await callback(server, other)).status, 403, 'users/@me não corresponde ao state');
   assert.equal(getTokens(USER, GUILD), null);
 });
 
@@ -146,6 +146,41 @@ test('state inválido não é apagado do Map', async (t) => {
   assert.equal(pendingStates.has(state), true);
 });
 
+test('state pertence à conta que concluiu o captcha; conta diferente recebe 403 e token revogado', async (t) => {
+  const calls = [];
+  t.mock.method(global, 'fetch', async (url, init) => {
+    calls.push({ path: new URL(url).pathname, body: String(init?.body ?? '') });
+    if (String(url).endsWith('/token/revoke')) return response(200);
+    if (String(url).includes('/users/@me')) return response(200, { id: 'attacker', username: 'Attacker' });
+    return response(200, { access_token: 'stolen', refresh_token: 'refresh', expires_in: 3600 });
+  });
+  setGuildConfig(GUILD, 'verify_role_id', '910000000000000010');
+  let roleCalls = 0;
+  const bot = { guilds: { fetch: async () => { roleCalls++; return null; } } };
+  const server = startOAuthServer(bot);
+  t.after(() => close(server));
+  await listen(server);
+  const state = stateFor();
+
+  assert.equal((await callback(server, state)).status, 403);
+  assert.equal((await callback(server, state)).status, 400);
+  assert.equal(pendingStates.has(state), false);
+  assert.equal(getTokens('attacker', GUILD), null);
+  assert.equal(getTokens(USER, GUILD), null);
+  assert.equal(roleCalls, 0);
+  assert.deepEqual(calls.map((c) => c.path), ['/api/v10/oauth2/token', '/api/v10/users/@me', '/api/v10/oauth2/token/revoke']);
+  assert.match(calls[2].body, /token=stolen/);
+});
+
+test('createOAuthUrl exige a identidade e remove states expirados sem callback', async (t) => {
+  assert.throws(() => createOAuthUrl(GUILD), /userId/);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const state = stateFor();
+  assert.equal(pendingStates.get(state).userId, USER);
+  t.mock.timers.tick(10 * 60 * 1000);
+  assert.equal(pendingStates.has(state), false);
+});
+
 test('refresh rotaciona token, falha apaga autorização, revoke chama Discord', async (t) => {
   const calls = [];
   let refreshOk = true;
@@ -169,6 +204,55 @@ test('refresh rotaciona token, falha apaga autorização, revoke chama Discord',
   refreshOk = false;
   assert.equal((await addUserToGuild({}, USER, GUILD)).ok, false);
   assert.equal(getTokens(USER, GUILD), null);
+});
+
+test('refresh simultâneo para o mesmo par usa uma troca e um token novo', async (t) => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const calls = [];
+  t.mock.method(global, 'fetch', async (url, init) => {
+    calls.push({ url: String(url), body: String(init?.body ?? '') });
+    if (String(url).includes('/guilds/')) return response(204);
+    await gate;
+    return response(200, { access_token: 'new-access', refresh_token: 'new-refresh', expires_in: 3600 });
+  });
+  saveTokens({ userId: USER, guildId: GUILD, accessToken: 'old', refreshToken: 'old-refresh', expiresAt: new Date(Date.now() - 1000).toISOString() });
+  const first = addUserToGuild({}, USER, GUILD);
+  const second = addUserToGuild({}, USER, GUILD);
+  assert.equal(calls.filter((c) => c.url.endsWith('/oauth2/token')).length, 1);
+  release();
+  assert.equal((await first).ok, true);
+  assert.equal((await second).ok, true);
+  assert.equal(getTokens(USER, GUILD).refreshToken, 'new-refresh');
+  assert.equal(calls.filter((c) => c.url.includes('/guilds/')).length, 2);
+  assert.ok(calls.filter((c) => c.url.includes('/guilds/')).every((c) => c.body.includes('new-access')));
+});
+
+test('refresh recusado não apaga autorização substituída enquanto aguardava Discord', async (t) => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  t.mock.method(global, 'fetch', async () => { await gate; return response(401); });
+  saveTokens({ userId: USER, guildId: GUILD, accessToken: 'old', refreshToken: 'old-refresh', expiresAt: new Date(Date.now() - 1000).toISOString() });
+  const pending = addUserToGuild({}, USER, GUILD);
+  saveTokens({ userId: USER, guildId: GUILD, accessToken: 'replacement', refreshToken: 'replacement-refresh', expiresAt: new Date(Date.now() + 3600_000).toISOString() });
+  release();
+  assert.equal((await pending).ok, false);
+  assert.equal(getTokens(USER, GUILD).accessToken, 'replacement');
+});
+
+test('refresh tardio não sobrescreve autorização substituída enquanto aguardava Discord', async (t) => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  t.mock.method(global, 'fetch', async () => {
+    await gate;
+    return response(200, { access_token: 'stale', refresh_token: 'stale-refresh', expires_in: 3600 });
+  });
+  saveTokens({ userId: USER, guildId: GUILD, accessToken: 'old', refreshToken: 'old-refresh', expiresAt: new Date(Date.now() - 1000).toISOString() });
+  const pending = addUserToGuild({}, USER, GUILD);
+  saveTokens({ userId: USER, guildId: GUILD, accessToken: 'replacement', refreshToken: 'replacement-refresh', expiresAt: new Date(Date.now() + 3600_000).toISOString() });
+  release();
+  assert.equal((await pending).ok, false);
+  assert.equal(getTokens(USER, GUILD).accessToken, 'replacement');
 });
 
 test('guilds.join trata 201, 204, 401, 403 e 429', async (t) => {

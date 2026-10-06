@@ -18,7 +18,6 @@ const {
 } = require('discord.js');
 
 const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
-const { canUseCommand } = require('../utils/commandPermissions');
 const { colors } = require('../config/settings');
 const {
   STATUSES,
@@ -317,14 +316,10 @@ function handleClose(interaction) {
   );
 }
 
-/**
- * A presença é global, então quando OWNER_ID está definido só o dono altera —
- * um admin de um servidor qualquer não deveria mudar como o bot aparece nos outros.
- */
+/** A presença é global: nenhuma permissão de servidor substitui o dono configurado. */
 function isAllowed(interaction) {
   const ownerId = process.env.OWNER_ID?.trim();
-  if (ownerId) return interaction.user.id === ownerId;
-  return canUseCommand(interaction, 'bot-status');
+  return /^\d{17,21}$/.test(ownerId ?? '') && interaction.user?.id === ownerId;
 }
 
 /** Roteia as interações do painel (`bstatus_*`). */

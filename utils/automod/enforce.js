@@ -211,7 +211,8 @@ async function enforce(message, violation, config) {
     ruleKey: key,
     points: rule.points,
     reason: detail,
-    excerpt: message.content,
+    // O detalhe da regra já descreve a violação; não duplicar o texto integral.
+    excerpt: null,
     channelId: message.channel.id,
     action: rule.action,
   });
@@ -268,10 +269,6 @@ async function enforce(message, violation, config) {
       inline: false,
     },
   ];
-
-  if (message.content) {
-    fields.push({ name: 'Conteúdo', value: `\`\`\`${message.content.slice(0, 900)}\`\`\``, inline: false });
-  }
 
   await automodLog(
     message.guild,

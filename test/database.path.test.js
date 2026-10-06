@@ -33,6 +33,26 @@ test('DATABASE_PATH manda no arquivo, criando a pasta se não existir', () => {
 
     assert.ok(fs.existsSync(target), 'o banco devia ter sido criado no caminho pedido');
     assert.ok(fs.statSync(target).size > 0, 'o schema devia ter sido aplicado');
+    if (process.platform !== 'win32') {
+      assert.equal(fs.statSync(path.dirname(target)).mode & 0o777, 0o700);
+      assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('banco existente com permissões amplas passa a ser privado', () => {
+  if (process.platform === 'win32') return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'botdb-'));
+  const target = path.join(dir, 'bot.sqlite');
+  try {
+    fs.writeFileSync(target, '', { mode: 0o640 });
+    execFileSync(process.execPath, ['-e', `require(${JSON.stringify(path.join(__dirname, '..', 'database', 'db.js'))})`], {
+      env: { ...process.env, DATABASE_PATH: target }, stdio: 'pipe',
+    });
+    assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(dir).mode & 0o777, 0o700);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

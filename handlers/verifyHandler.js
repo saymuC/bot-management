@@ -268,7 +268,7 @@ async function grantAccess(interaction, roleId, attemptsUsed) {
       ],
       components: [
         new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setLabel('Conectar conta').setStyle(ButtonStyle.Link).setURL(createOAuthUrl(interaction.guild.id))
+          new ButtonBuilder().setLabel('Conectar conta').setStyle(ButtonStyle.Link).setURL(createOAuthUrl(interaction.guild.id, interaction.user.id))
         ),
       ],
       files: [],

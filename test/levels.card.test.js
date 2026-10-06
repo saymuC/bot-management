@@ -209,6 +209,16 @@ test('avatar sem URL não chega a tentar rede', async () => {
 
 // --- Fundo remoto ----------------------------------------------------------
 
+const pngHeader = (width, height) => {
+  const bytes = Buffer.alloc(33);
+  Buffer.from('89504e470d0a1a0a', 'hex').copy(bytes);
+  bytes.writeUInt32BE(13, 8);
+  bytes.write('IHDR', 12);
+  bytes.writeUInt32BE(width, 16);
+  bytes.writeUInt32BE(height, 20);
+  return bytes;
+};
+
 test('fundo sem URL configurada não faz download', async () => {
   backgroundCache.clear();
   const deps = { fetcher: async () => assert.fail('não deveria baixar nada'), decoder: async () => imagemFalsa() };
@@ -241,7 +251,7 @@ test('fundo aceito é decodificado uma vez e reusado', async () => {
   let decodificacoes = 0;
 
   const deps = {
-    fetcher: async () => ({ ok: true, bytes: Buffer.from([1, 2]), contentType: 'image/png' }),
+    fetcher: async () => ({ ok: true, bytes: pngHeader(1600, 900), contentType: 'image/png' }),
     decoder: async () => {
       decodificacoes += 1;
       return imagemFalsa(1600, 900);
@@ -253,6 +263,21 @@ test('fundo aceito é decodificado uma vez e reusado', async () => {
 
   assert.equal(primeira, segunda);
   assert.equal(decodificacoes, 1);
+});
+
+test('fundo com bomba de pixels, animacao ou SVG nao chega ao decoder e fica em cache', async () => {
+  const animated = Buffer.concat([pngHeader(100, 100), Buffer.from('000000086163544c0000000100000000', 'hex')]);
+  for (const bytes of [pngHeader(8193, 1), pngHeader(4096, 4096), animated, Buffer.from('<svg width="1" height="1"/>')]) {
+    backgroundCache.clear();
+    let downloads = 0;
+    const deps = {
+      fetcher: async () => { downloads++; return { ok: true, bytes, contentType: 'image/png' }; },
+      decoder: async () => assert.fail('imagem perigosa chegou ao decoder'),
+    };
+    assert.equal(await loadBackgroundImage('https://example.test/bomb', deps), null);
+    assert.equal(await loadBackgroundImage('https://example.test/bomb', deps), null);
+    assert.equal(downloads, 1);
+  }
 });
 
 // --- Render ----------------------------------------------------------------
