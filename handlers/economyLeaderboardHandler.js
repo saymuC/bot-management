@@ -50,7 +50,7 @@ async function buildRanking(guild, requestedPage, userId) {
     })),
   });
   if (image) return {
-    content: '', embeds: [], attachments: [],
+    content: `Sua posição: ${position ? `#${position}` : 'sem posição'}`, embeds: [], attachments: [],
     files: [new AttachmentBuilder(image, { name: `economia-p${page}.png` })], components,
   };
   return {

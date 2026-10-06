@@ -48,13 +48,19 @@ test('paginação usa o usuário que clicou e gera IDs sem o autor original', as
   changeBalance({ guildId: GUILD, userId: USER_A, operation: 'add', amount: 100, source: 'test' });
   changeBalance({ guildId: GUILD, userId: USER_B, operation: 'add', amount: 200, source: 'test' });
   const initial = await buildRanking(guild, 1, USER_A);
-  if (checkCanvasFonts().ok) assert.equal(initial.files.length, 1);
+  if (checkCanvasFonts().ok) {
+    assert.equal(initial.files.length, 1);
+    assert.equal(initial.content, 'Sua posição: #2');
+  }
   else assert.match(initial.embeds[0].toJSON().footer.text, /Sua posição: #2/);
   assert.equal(initial.components[0].components[1].custom_id, 'ecotop_2');
   let updated;
   await handleRankingPagination({ guild, user: { id: USER_B },
     deferUpdate: async () => {}, editReply: async (payload) => { updated = payload; } }, '2');
-  if (checkCanvasFonts().ok) assert.equal(updated.files.length, 1);
+  if (checkCanvasFonts().ok) {
+    assert.equal(updated.files.length, 1);
+    assert.equal(updated.content, 'Sua posição: #1');
+  }
   else assert.match(updated.embeds[0].toJSON().footer.text, /Sua posição: #1/);
   assert.equal(updated.components[0].components[1].custom_id, 'ecotop_2');
 });
