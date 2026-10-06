@@ -77,7 +77,7 @@ test('central mostra as opções combinadas', () => {
   assert.equal(payload.embeds[0].data.title, '⚙️ Central de Configuração');
   assert.deepEqual(
     select.options.map((option) => option.value),
-    ['verify', 'logs', 'tickets', 'automod', 'welcome', 'levels', 'emojis', 'autorole', 'permissions', 'reactionrole']
+    ['verify', 'logs', 'tickets', 'automod', 'welcome', 'levels', 'economy', 'emojis', 'autorole', 'permissions', 'reactionrole']
   );
   assert.deepEqual(payload.allowedMentions, { parse: [] });
 });
@@ -102,6 +102,7 @@ test('selecionar cada painel abre o payload existente', async () => {
     automod: 'Painel do AutoMod',
     welcome: 'Painel de boas-vindas',
     levels: 'Configuração de níveis e XP',
+    economy: 'Economia do servidor',
     emojis: 'Emojis do bot',
     autorole: 'Cargo automático',
     reactionrole: 'Reaction role',
@@ -114,6 +115,13 @@ test('selecionar cada painel abre o payload existente', async () => {
     assert.equal(i.calls[0].method, 'update', value);
     assert.match(`${i.calls[0].payload.content ?? ''} ${i.calls[0].payload.embeds[0].data.title}`, new RegExp(marker), value);
   }
+});
+
+test('economia aberta pelo /config usa o mesmo painel e preserva seu gate', async () => {
+  const i = interaction({ values: ['economy'] });
+  await routeConfigCenter(i);
+  assert.equal(i.calls[0].method, 'update');
+  assert.equal(i.calls[0].payload.components[0].components[0].custom_id, 'eco_cfg_toggle');
 });
 
 test('selecionar cargo do autorole salva direto', async () => {

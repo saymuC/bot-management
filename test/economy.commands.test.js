@@ -3,11 +3,14 @@ const assert = require('node:assert/strict');
 const { db, setGuildConfig } = require('../database/db');
 const { changeBalance } = require('../utils/economy/service');
 const { buildRanking, handleRankingPagination } = require('../handlers/economyLeaderboardHandler');
+const { checkCanvasFonts } = require('../utils/canvasFonts');
 
 const GUILD = 'test-economy-commands';
 const USER_A = '111111111111111111';
 const USER_B = '222222222222222222';
 const guild = { id: GUILD, name: 'Teste' };
+guild.members = { cache: new Map(), fetch: async (id) => ({ displayName: `Membro ${id}`, user: { username: id, displayAvatarURL: () => null } }) };
+guild.client = { users: { cache: new Map(), fetch: async () => null } };
 
 function cleanup() {
   db.prepare('DELETE FROM guild_config WHERE guild_id = ?').run(GUILD);
@@ -45,11 +48,19 @@ test('paginação usa o usuário que clicou e gera IDs sem o autor original', as
   changeBalance({ guildId: GUILD, userId: USER_A, operation: 'add', amount: 100, source: 'test' });
   changeBalance({ guildId: GUILD, userId: USER_B, operation: 'add', amount: 200, source: 'test' });
   const initial = await buildRanking(guild, 1, USER_A);
-  assert.match(initial.embeds[0].toJSON().footer.text, /Sua posição: #2/);
+  if (checkCanvasFonts().ok) {
+    assert.equal(initial.files.length, 1);
+    assert.equal(initial.content, 'Sua posição: #2');
+  }
+  else assert.match(initial.embeds[0].toJSON().footer.text, /Sua posição: #2/);
   assert.equal(initial.components[0].components[1].custom_id, 'ecotop_2');
   let updated;
   await handleRankingPagination({ guild, user: { id: USER_B },
     deferUpdate: async () => {}, editReply: async (payload) => { updated = payload; } }, '2');
-  assert.match(updated.embeds[0].toJSON().footer.text, /Sua posição: #1/);
+  if (checkCanvasFonts().ok) {
+    assert.equal(updated.files.length, 1);
+    assert.equal(updated.content, 'Sua posição: #1');
+  }
+  else assert.match(updated.embeds[0].toJSON().footer.text, /Sua posição: #1/);
   assert.equal(updated.components[0].components[1].custom_id, 'ecotop_2');
 });

@@ -21,11 +21,16 @@ module.exports = {
       return respond(interaction, { embeds: [baseEmbed({ title: `${emoji(interaction.guild, 'eco_coin')} Economia`, description: err.message })] });
     }
     const { icon, name } = currency(interaction.guild);
-    return respond(interaction, { embeds: [baseEmbed({
+    return respond(interaction, { embeds: [baseEmbed(result.retryAt ? {
+      title: `${emoji(interaction.guild, 'timer')} Daily em espera`,
+      description: `Você já coletou sua recompensa. Volte em **${formatWait(result.retryAt - Date.now())}**.`,
+    } : {
       title: `${emoji(interaction.guild, 'eco_daily')} Recompensa diária`,
-      description: result.retryAt
-        ? `${emoji(interaction.guild, 'timer')} Você já coletou. Volte em ${formatWait(result.retryAt - Date.now())}.`
-        : `Você coletou **${icon} +${formatMoney(result.reward)} ${name}**!\nSaldo: ${formatMoney(result.balance)} ${name}. Volte amanhã.`,
+      description: `Seu presente de hoje já está na carteira. Volte amanhã para buscar o próximo!`,
+      fields: [
+        { name: 'Recebido', value: `${icon} **+${formatMoney(result.reward)} ${name}**`, inline: true },
+        { name: 'Saldo atual', value: `${icon} **${formatMoney(result.balance)} ${name}**`, inline: true },
+      ],
     })] });
   },
 };

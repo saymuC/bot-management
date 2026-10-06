@@ -19,6 +19,7 @@ const { getWelcomeConfig } = require('../utils/welcomeConfig');
 const { buildPanelPayload: welcomePanelPayload } = require('./welcomeSetupHandler');
 const { getLevelsConfig } = require('../utils/levels/config');
 const { buildPanelPayload: levelsPanelPayload } = require('./levelsSetupHandler');
+const { buildEconomyPanel } = require('./economyHandler');
 const { buildEmojiPanel } = require('./emojiConfigHandler');
 const { homePayload: permissionsHomePayload } = require('./permissionsSetupHandler');
 const { baseEmbed, errorEmbed, successEmbed } = require('../utils/embeds');
@@ -84,6 +85,12 @@ function centerPayload(guild) {
               value: 'levels',
               emoji: emoji(guild, 'rank'),
               description: 'XP, anúncios, recompensas e aparência',
+            },
+            {
+              label: 'Economia',
+              value: 'economy',
+              emoji: emoji(guild, 'eco_coin'),
+              description: 'Moeda, recompensas e trabalho',
             },
             {
               label: 'Emojis do bot',
@@ -210,6 +217,8 @@ function selectedPanel(interaction, selected) {
       return welcomePanelPayload(getWelcomeConfig(interaction.guild.id), interaction.member);
     case 'levels':
       return levelsPanelPayload(getLevelsConfig(interaction.guild.id), interaction.guild);
+    case 'economy':
+      return buildEconomyPanel(interaction.guild);
     case 'emojis':
       return buildEmojiPanel(interaction.guild);
     case 'autorole':
@@ -272,6 +281,11 @@ async function routeConfigCenter(interaction) {
   const action = interaction.customId.slice(PREFIX.length);
 
   if (action === 'open') {
+    if (interaction.values[0] === 'economy' && !canUseCommand(interaction, 'economy-config')) {
+      return safeAck(interaction, () => interaction.reply({
+        embeds: [errorEmbed(PERMISSION_DENIED_MESSAGE, undefined, interaction.guild)], flags: MessageFlags.Ephemeral,
+      }));
+    }
     return safeAck(interaction, () => interaction.update(selectedPanel(interaction, interaction.values[0])));
   }
 

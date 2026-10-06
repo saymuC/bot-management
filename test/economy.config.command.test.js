@@ -34,10 +34,11 @@ test('painel autoriza admin, mostra modal e salva recompensas', async () => {
   await routeEconomyConfig({ ...interaction, customId: 'eco_cfg_submit_rewards', isButton: () => false,
     isModalSubmit: () => true, isFromMessage: () => true,
     fields: { getTextInputValue: (key) => ({ dailyMin: '301', dailyMax: '401', workMin: '151', workMax: '251', workCooldownMinutes: '45' })[key] },
-    update: async (payload) => assert.equal(payload.embeds[0].toJSON().description.includes('301–401'), true),
+    update: async (payload) => assert.match(payload.embeds[0].toJSON().fields[2].value, /301 a 401/),
   });
   assert.equal(getEconomyConfig(ID).workCooldownMinutes, 45);
-  assert.equal(buildEconomyPanel(guild).components.length, 1);
+  assert.equal(buildEconomyPanel(guild).components.length, 2);
+  assert.equal(buildEconomyPanel(guild).components[1].components[0].custom_id, 'eco_cfg_close');
 });
 
 test('modal inválido responde sem alterar valores e toggle muda o status', async () => {
@@ -50,7 +51,15 @@ test('modal inválido responde sem alterar valores e toggle muda o status', asyn
   });
   assert.equal(getEconomyConfig(ID).dailyMin, 301);
   await routeEconomyConfig({ ...base, customId: 'eco_cfg_toggle', isButton: () => true,
-    update: async (payload) => assert.match(payload.embeds[0].toJSON().description, /Desativada/),
+    update: async (payload) => assert.match(payload.embeds[0].toJSON().fields[0].value, /Desativada/),
   });
   assert.equal(getEconomyConfig(ID).enabled, false);
+});
+
+test('fechar painel retira os controles', async () => {
+  await routeEconomyConfig({ guild, guildId: ID, user: { id: 'user' },
+    memberPermissions: { has: (permission) => permission === PermissionFlagsBits.Administrator },
+    customId: 'eco_cfg_close', isButton: () => true,
+    update: async (payload) => assert.deepEqual(payload.components, []),
+  });
 });

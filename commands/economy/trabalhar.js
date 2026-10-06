@@ -22,11 +22,16 @@ module.exports = {
     }
     const job = result.job;
     const { icon, name } = currency(interaction.guild);
-    return respond(interaction, { embeds: [baseEmbed({
-      title: `${emoji(interaction.guild, 'eco_work')} Trabalho`,
-      description: result.retryAt
-        ? `${emoji(interaction.guild, 'timer')} Você ainda está cansado. Tente novamente em ${formatWait(result.retryAt - Date.now())}.`
-        : `${emoji(interaction.guild, job.emojiKey)} Você trabalhou como **${job.name}**.\n\n${job.messages[Math.floor(Math.random() * job.messages.length)]}\n\n${icon} +${formatMoney(result.reward)} ${name} · Saldo: ${formatMoney(result.balance)}`,
+    return respond(interaction, { embeds: [baseEmbed(result.retryAt ? {
+      title: `${emoji(interaction.guild, 'timer')} Hora de descansar`,
+      description: `Você ainda está cansado do último trabalho. Tente novamente em **${formatWait(result.retryAt - Date.now())}**.`,
+    } : {
+      title: `${emoji(interaction.guild, job.emojiKey)} Turno de ${job.name}`,
+      description: job.messages[Math.floor(Math.random() * job.messages.length)],
+      fields: [
+        { name: 'Pagamento', value: `${icon} **+${formatMoney(result.reward)} ${name}**`, inline: true },
+        { name: 'Saldo atual', value: `${icon} **${formatMoney(result.balance)} ${name}**`, inline: true },
+      ],
     })] });
   },
 };

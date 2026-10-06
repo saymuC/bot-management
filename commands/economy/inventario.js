@@ -18,11 +18,13 @@ module.exports = {
     if (user.bot) return respond(interaction, { embeds: [errorEmbed('Bots não possuem inventário.', undefined, interaction.guild)] });
     const lines = getInventory(interaction.guild.id, user.id).map((row) => {
       const item = ITEMS.find((entry) => entry.id === row.item_id);
-      return item ? `${emoji(interaction.guild, item.emojiKey)} ${item.name} ×${row.quantity}` : `${row.item_id} ×${row.quantity}`;
+      return { name: item ? `${emoji(interaction.guild, item.emojiKey)} ${item.name}` : row.item_id,
+        value: `Quantidade: **${row.quantity}**`, inline: true };
     });
     return respond(interaction, { embeds: [baseEmbed({
       title: `${emoji(interaction.guild, 'eco_inventory')} Inventário de ${user.username}`,
-      description: lines.join('\n') || 'Inventário vazio. Confira /loja para comprar itens.',
+      description: lines.length ? 'Itens guardados na sua coleção:' : 'Inventário vazio. Confira `/loja` para comprar itens.',
+      fields: lines,
     })] });
   },
 };
