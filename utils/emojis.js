@@ -118,6 +118,7 @@ const REGISTRY = Object.freeze({
   eco_work: { label: 'Trabalho', default: '💼', category: 'economy', usage: '/trabalhar' },
   eco_shop: { label: 'Loja', default: '🛒', category: 'economy', usage: '/loja' },
   eco_inventory: { label: 'Inventário', default: '🎒', category: 'economy', usage: '/inventario' },
+  eco_statement: { label: 'Extrato', default: '📜', category: 'economy', usage: '/extrato' },
   eco_cafe: { label: 'Café', default: '☕', category: 'economy', usage: 'Item Café' },
   eco_pizza: { label: 'Pizza', default: '🍕', category: 'economy', usage: 'Item Pizza' },
   eco_box: { label: 'Caixa Misteriosa', default: '📦', category: 'economy', usage: 'Item Caixa' },
