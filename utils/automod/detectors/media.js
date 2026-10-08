@@ -72,7 +72,7 @@ function findMediaLink(content, limits) {
 
   if (limits.gifs) {
     for (const host of GIF_HOSTS) {
-      const escaped = host.replace(/\./g, '\\.');
+      const escaped = host.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       if (new RegExp(`(?:^|[^a-z0-9.-])(?:[a-z0-9-]+\\.)*${escaped}/`, 'i').test(text)) {
         return { kind: 'gifs', host };
       }

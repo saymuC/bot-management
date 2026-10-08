@@ -82,11 +82,13 @@ test('a assinatura ignora caixa e acento', () => {
 });
 
 test('rollXp sorteia inclusivamente entre mínimo e máximo', () => {
-  assert.equal(rollXp({ xpMin: 15, xpMax: 25 }, () => 0), 15);
-  assert.equal(rollXp({ xpMin: 15, xpMax: 25 }, () => 0.999999), 25);
-  assert.equal(rollXp({ xpMin: 20, xpMax: 20 }, () => 0.5), 20);
+  for (let i = 0; i < 100; i += 1) {
+    const xp = rollXp({ xpMin: 15, xpMax: 25 });
+    assert.ok(Number.isInteger(xp) && xp >= 15 && xp <= 25);
+  }
+  assert.equal(rollXp({ xpMin: 20, xpMax: 20 }), 20);
   // Config invertida não pode render NaN nem valor negativo no motor.
-  assert.equal(rollXp({ xpMin: 30, xpMax: 10 }, () => 0), 30);
+  assert.equal(rollXp({ xpMin: 30, xpMax: 10 }), 30);
 });
 
 // ---------------------------------------------------------------------------

@@ -424,6 +424,12 @@ test('detector media respeita a categoria desligada', () => {
   assert.equal(findMediaLink('entra em exemplo.com/pagina', limitsOf('media')), null);
 });
 
+test('detector media reconhece host de GIF literal sem aceitar dominio parecido', () => {
+  const onlyGifs = limitsOf('media', { images: false, videos: false, files: false, stickers: false });
+  assert.deepEqual(findMediaLink('https://www.giphy.com/view/abc', onlyGifs), { kind: 'gifs', host: 'giphy.com' });
+  assert.equal(findMediaLink('https://giphyXcom/view/abc', onlyGifs), null);
+});
+
 test('detectores lines, emojis, spoilers e zalgo comparam com o limite', () => {
   assert.ok(excess.lines({ content: 'a\nb\nc\nd' }, limitsOf('lines', { max: 3 })));
   assert.equal(excess.lines({ content: 'a\nb\nc' }, limitsOf('lines', { max: 3 })), null);
