@@ -3,6 +3,7 @@ const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBui
 const { baseEmbed, errorEmbed } = require('../utils/embeds');
 const { emoji } = require('../utils/emojis');
 const { getEconomyConfig, saveEconomyConfig } = require('../config/economy');
+const { currency } = require('../utils/economy/currency');
 const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
 
 const PREFIX = 'eco_cfg_';
@@ -10,7 +11,7 @@ const PREFIX = 'eco_cfg_';
 /** @param {import('discord.js').Guild} guild */
 function buildEconomyPanel(guild) {
   const config = getEconomyConfig(guild.id);
-  const coin = config.currencyEmoji ?? emoji(guild, 'eco_coin');
+  const coin = currency(guild).icon;
   return {
     embeds: [baseEmbed({
       title: `${emoji(guild, 'eco_shop')} Economia do servidor`,

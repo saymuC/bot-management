@@ -90,9 +90,11 @@ async function renderBalanceCard(data) {
     ctx.restore();
     drawAvatar(ctx, { image: avatar, cx: 177, cy: 205, radius: 92, initial: initialOf(data.name),
       family: fonts.strong, ring: '#30303a', fallbackFill: '#252630', fallbackColor: TEXT });
-    ctx.fillStyle = STATUS[data.status] ?? STATUS.offline;
-    ctx.beginPath(); ctx.arc(247, 272, 18, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#24252e'; ctx.lineWidth = 6; ctx.stroke();
+    if (data.status && STATUS[data.status]) {
+      ctx.fillStyle = STATUS[data.status];
+      ctx.beginPath(); ctx.arc(247, 272, 18, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#24252e'; ctx.lineWidth = 6; ctx.stroke();
+    }
     setFont(ctx, fonts, 52); ctx.fillStyle = TEXT;
     ctx.fillText(fitText(ctx, data.name, 550), 330, 218);
     coin(ctx, 122, 360, 39);

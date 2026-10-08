@@ -28,7 +28,7 @@ module.exports = {
       balance, position, currencyName: name,
       avatarUrl: user.displayAvatarURL({ extension: 'png', size: 256 }),
       bannerUrl: profile.bannerURL?.({ extension: 'png', size: 1024 }) ?? null,
-      status: member?.presence?.status ?? 'offline',
+      status: member?.presence?.status,
     });
     if (image) return respond(interaction, { files: [new AttachmentBuilder(image, { name: `saldo-${user.id}.png` })] });
     return respond(interaction, { embeds: [baseEmbed({

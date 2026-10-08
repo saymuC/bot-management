@@ -1,9 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { PermissionFlagsBits } = require('discord.js');
-const { db } = require('../database/db');
+const { db, setGuildConfig } = require('../database/db');
 const { routeEconomyConfig, buildEconomyPanel } = require('../handlers/economyHandler');
 const { getEconomyConfig } = require('../config/economy');
+const { emoji } = require('../utils/emojis');
 
 const ID = 'test-economy-panel';
 const guild = { id: ID, name: 'Testes' };
@@ -62,4 +63,14 @@ test('fechar painel retira os controles', async () => {
     customId: 'eco_cfg_close', isButton: () => true,
     update: async (payload) => assert.deepEqual(payload.components, []),
   });
+});
+
+test('painel troca emoji da moeda inacessível antes de construir o botão', () => {
+  const stale = '<:moeda:123456789012345678>';
+  setGuildConfig(ID, 'economy_config', JSON.stringify({ currencyEmoji: stale }));
+  const withCache = { ...guild, client: { emojis: { cache: new Map() } } };
+  const panel = buildEconomyPanel(withCache);
+  assert.equal(getEconomyConfig(ID).currencyEmoji, stale);
+  assert.equal(panel.embeds[0].toJSON().fields[1].value, `${emoji(withCache, 'eco_coin')} moedas`);
+  assert.equal(panel.components[0].components[2].emoji.name, emoji(withCache, 'eco_coin'));
 });
