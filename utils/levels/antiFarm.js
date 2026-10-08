@@ -13,6 +13,7 @@
  * ainda passa do mínimo.
  */
 
+const { randomInt } = require('node:crypto');
 const { toPlain } = require('../automod/textNormalize');
 
 /** Teto do texto examinado, para uma mensagem enorme não custar caro. */
@@ -94,13 +95,12 @@ function inspectContent(content, { minUsefulChars }) {
  * Sorteia o XP da mensagem, inclusivo nas duas pontas.
  *
  * @param {{ xpMin: number, xpMax: number }} config
- * @param {() => number} [random] injetável para o teste não depender de sorte
  * @returns {number}
  */
-function rollXp({ xpMin, xpMax }, random = Math.random) {
+function rollXp({ xpMin, xpMax }) {
   const min = Math.max(0, Math.trunc(xpMin));
   const max = Math.max(min, Math.trunc(xpMax));
-  return min + Math.floor(random() * (max - min + 1));
+  return randomInt(min, max + 1);
 }
 
 module.exports = {
