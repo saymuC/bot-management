@@ -37,7 +37,7 @@ test('loja e trabalhos têm variedade, emojis registrados e mensagens alternativ
   assert.ok(JOBS.every((job) => REGISTRY[job.emojiKey] && job.messages.length === 2));
   for (let n = 0; n < JOBS.length; n += 1) {
     const result = claimReward({ guildId: GUILD, userId: USER, action: 'work', now: 1 + n * 1_800_000,
-      random: (() => { let count = 0; return () => count++ === 0 ? 0 : (n + 0.1) / JOBS.length; })() });
+      roll: (() => { let count = 0; return (min) => count++ === 0 ? min : n; })() });
     assert.equal(result.job.name, JOBS[n].name);
   }
 });
@@ -49,14 +49,14 @@ test('cada crime tem risco próprio; sucesso credita saldo e XP com cooldown', (
   for (let n = 0; n < CRIMES.length; n += 1) {
     const crime = CRIMES[n];
     const now = 1000 + n * CRIME_COOLDOWN_MS;
-    const rolls = [n / CRIMES.length + 0.001, 0.99, 0];
-    const result = commitCrime({ guildId: GUILD, userId: USER, now, random: () => rolls.shift() });
+    const rolls = [n, 99, crime.min];
+    const result = commitCrime({ guildId: GUILD, userId: USER, now, roll: () => rolls.shift() });
     assert.equal(result.crime, crime.name);
     assert.equal(result.amount, crime.min);
     assert.equal(result.xp, crime.xp);
     assert.equal(result.caught, false);
     assert.ok(crime.caught > 0 && crime.caught < 1);
-    assert.equal(commitCrime({ guildId: GUILD, userId: USER, now, random: () => { throw Error('não deve sortear'); } }).retryAt, now + CRIME_COOLDOWN_MS);
+    assert.equal(commitCrime({ guildId: GUILD, userId: USER, now, roll: () => { throw Error('não deve sortear'); } }).retryAt, now + CRIME_COOLDOWN_MS);
   }
   assert.equal(economy.getTransactions(GUILD, USER).filter((row) => row.type === 'crime_reward').length, CRIMES.length);
   assert.equal(getUserState(GUILD, USER).totalXp, CRIMES.reduce((sum, crime) => sum + crime.xp, 0));
@@ -65,15 +65,15 @@ test('cada crime tem risco próprio; sucesso credita saldo e XP com cooldown', (
 test('prisão cobra parte do saldo sem negativar, não dá XP e respeita cooldown', () => {
   cleanup();
   changeBalance({ guildId: GUILD, userId: USER, operation: 'add', amount: 1000, source: 'test' });
-  const rolls = [0.99, 0];
-  const caught = commitCrime({ guildId: GUILD, userId: USER, now: 1000, random: () => rolls.shift() });
+  const rolls = [CRIMES.length - 1, 0];
+  const caught = commitCrime({ guildId: GUILD, userId: USER, now: 1000, roll: () => rolls.shift() });
   assert.equal(caught.amount, -350);
   assert.equal(caught.balance, 650);
   assert.equal(caught.xp, 0);
   assert.equal(economy.getTransactions(GUILD, USER)[0].type, 'crime_fine');
   assert.equal(getUserState(GUILD, USER).totalXp, 0);
   changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: 0, source: 'test' });
-  const again = commitCrime({ guildId: GUILD, userId: USER, now: 1000 + CRIME_COOLDOWN_MS, random: () => 0 });
+  const again = commitCrime({ guildId: GUILD, userId: USER, now: 1000 + CRIME_COOLDOWN_MS, roll: () => 0 });
   assert.equal(again.amount, 0);
   assert.equal(again.balance, 0);
 });
@@ -85,7 +85,7 @@ test('economia e níveis desativados impedem ganhos indevidos', () => {
   assert.equal(db.prepare('SELECT COUNT(*) AS total FROM economy_cooldowns WHERE guild_id = ?').get(GUILD).total, 0);
   setGuildConfig(GUILD, 'economy_config', JSON.stringify({ enabled: true }));
   setGuildConfig(GUILD, 'levels_config', JSON.stringify({ enabled: false }));
-  const result = commitCrime({ guildId: GUILD, userId: USER, now: 1000, random: () => 0.99 });
+  const result = commitCrime({ guildId: GUILD, userId: USER, now: 1000, roll: (min, max) => max - 1 });
   assert.ok(result.amount > 0);
   assert.equal(result.xp, 0);
   assert.equal(getUserState(GUILD, USER).totalXp, 0);
@@ -96,24 +96,20 @@ test('comando apresenta emojis globais e não paga de novo no cooldown', async (
   setGuildConfig(GUILD, 'levels_config', JSON.stringify({ enabled: true }));
   setGuildEmoji(GUILD, 'eco_crime', '🧭');
   setGuildEmoji(GUILD, 'eco_police', '🛡️');
-  const original = Math.random;
   try {
-    Math.random = () => 0.99;
     const success = interaction();
     await command.execute(success);
-    assert.match(success.calls[0].embeds[0].toJSON().title, /🧭/);
+    assert.match(success.calls[0].embeds[0].toJSON().title, /🧭|🛡️/);
     const balance = economy.getBalance(GUILD, USER);
     const waiting = interaction();
     await command.execute(waiting);
     assert.match(waiting.calls[0].embeds[0].toJSON().description, /Tente novamente/);
     assert.equal(economy.getBalance(GUILD, USER), balance);
     db.prepare('DELETE FROM economy_cooldowns WHERE guild_id = ?').run(GUILD);
-    Math.random = () => 0;
     const caught = interaction();
     await command.execute(caught);
-    assert.match(caught.calls[0].embeds[0].toJSON().title, /🛡️/);
+    assert.match(caught.calls[0].embeds[0].toJSON().title, /🧭|🛡️/);
   } finally {
-    Math.random = original;
     resetGuildEmojis();
   }
 });

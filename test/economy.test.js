@@ -74,13 +74,13 @@ test('edição administrativa valida pares e preserva configuração anterior no
 
 test('daily e trabalho respeitam cooldown persistente e não duplicam pagamento', () => {
   cleanup();
-  const params = { guildId: GUILD, userId: USER, action: 'daily', random: () => 0, now: 1000 };
+  const params = { guildId: GUILD, userId: USER, action: 'daily', roll: (min) => min, now: 1000 };
   assert.equal(claimReward(params).reward, DAILY.min);
   assert.equal(claimReward(params).retryAt, 1000 + DAILY.cooldownMs);
   assert.equal(repo.getBalance(GUILD, USER), DAILY.min);
   assert.equal(repo.getTransactions(GUILD, USER).length, 1);
   assert.equal(claimReward({ ...params, now: 1000 + DAILY.cooldownMs }).reward, DAILY.min);
-  const work = claimReward({ ...params, action: 'work', random: () => 0.1 });
+  const work = claimReward({ ...params, action: 'work' });
   assert.ok(work.job);
   assert.ok(work.reward >= WORK.min && work.reward <= WORK.max);
   assert.equal(claimReward({ ...params, action: 'work' }).reward, 0);

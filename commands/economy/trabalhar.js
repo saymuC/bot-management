@@ -1,4 +1,5 @@
 // @ts-check
+const { randomInt } = require('node:crypto');
 const { SlashCommandBuilder } = require('discord.js');
 const { respond } = require('../../utils/interactions');
 const { baseEmbed } = require('../../utils/embeds');
@@ -27,7 +28,7 @@ module.exports = {
       description: `Você ainda está cansado do último trabalho. Tente novamente em **${formatWait(result.retryAt - Date.now())}**.`,
     } : {
       title: `${emoji(interaction.guild, job.emojiKey)} Turno de ${job.name}`,
-      description: job.messages[Math.floor(Math.random() * job.messages.length)],
+      description: job.messages[randomInt(job.messages.length)],
       fields: [
         { name: 'Pagamento', value: `${icon} **+${formatMoney(result.reward)} ${name}**`, inline: true },
         { name: 'Saldo atual', value: `${icon} **${formatMoney(result.balance)} ${name}**`, inline: true },
