@@ -3,6 +3,19 @@ const repository = require('./repository');
 const { MAX_BALANCE, DAILY, WORK, getEconomyConfig } = require('../../config/economy');
 const { ITEMS } = require('./shop');
 const { JOBS } = require('./jobs');
+const { db } = require('../../database/db');
+const { changeXp } = require('../levels/service');
+const { getLevelsConfig } = require('../levels/config');
+
+const CRIMES = Object.freeze([
+  { name: 'furtar um doce da padaria', min: 40, max: 90, xp: 2, caught: 0.12, fine: 0.10 },
+  { name: 'roubar uma bicicleta', min: 100, max: 200, xp: 5, caught: 0.20, fine: 0.15 },
+  { name: 'assaltar uma barraca de feira', min: 180, max: 320, xp: 8, caught: 0.28, fine: 0.20 },
+  { name: 'roubar uma loja', min: 300, max: 500, xp: 12, caught: 0.35, fine: 0.25 },
+  { name: 'invadir um cassino', min: 550, max: 900, xp: 20, caught: 0.48, fine: 0.30 },
+  { name: 'roubar um banco', min: 1000, max: 1700, xp: 35, caught: 0.65, fine: 0.35 },
+]);
+const CRIME_COOLDOWN_MS = 30 * 60_000;
 
 class EconomyDisabledError extends Error {
   constructor() { super('A economia está desativada neste servidor.'); }
@@ -69,4 +82,32 @@ function purchaseItem({ guildId, userId, itemId }) {
   return { ...result, item };
 }
 
-module.exports = { EconomyDisabledError, changeBalance, claimReward, purchaseItem };
+/** @param {{guildId: string, userId: string, now?: number, random?: () => number}} params */
+function commitCrime({ guildId, userId, now = Date.now(), random = Math.random }) {
+  validateIds(guildId, userId);
+  if (!Number.isSafeInteger(now) || now < 0) throw new Error('Horário inválido.');
+  if (!getEconomyConfig(guildId).enabled) throw new EconomyDisabledError();
+  return db.transaction(() => {
+    // O sorteio ocorre dentro da transação: cooldown, saldo e XP são confirmados juntos.
+    /** @type {{crime: typeof CRIMES[number], caught: boolean} | null} */
+    let outcome = null;
+    const result = repository.applyBalance(guildId, userId, (balance, onCooldown) => {
+      if (onCooldown('crime', now)) return { balance, source: 'crime', cooldown: { action: 'crime', now, expiresAt: now + CRIME_COOLDOWN_MS } };
+      const crime = CRIMES[Math.floor(random() * CRIMES.length)];
+      const caught = random() < crime.caught;
+      outcome = { crime, caught };
+      const amount = caught ? -Math.min(balance, Math.ceil(balance * crime.fine))
+        : Math.min(rewardBetween(crime.min, crime.max, random), MAX_BALANCE - balance);
+      return { balance: balance + amount, source: caught ? 'crime_fine' : 'crime_reward',
+        metadata: { crime: crime.name }, cooldown: { action: 'crime', now, expiresAt: now + CRIME_COOLDOWN_MS } };
+    });
+    if (result.retryAt) return { retryAt: result.retryAt, balance: result.balance, crime: null, caught: false, amount: 0, xp: 0 };
+    const selected = /** @type {{crime: typeof CRIMES[number], caught: boolean} | null} */ (outcome);
+    if (!selected) throw new Error('Crime não selecionado.');
+    const xp = selected.caught || !getLevelsConfig(guildId).enabled ? 0
+      : changeXp({ guildId, userId, operation: 'add', amount: selected.crime.xp, source: 'crime' }).delta;
+    return { retryAt: null, balance: result.balance, crime: selected.crime.name, caught: selected.caught, amount: result.balance - result.previousBalance, xp };
+  }).immediate();
+}
+
+module.exports = { EconomyDisabledError, changeBalance, claimReward, purchaseItem, commitCrime, CRIMES, CRIME_COOLDOWN_MS };

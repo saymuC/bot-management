@@ -7,7 +7,7 @@ const { getBalance, getTransactions } = require('../../utils/economy/repository'
 const { formatMoney } = require('../../utils/economy/formatter');
 const { currency } = require('../../utils/economy/currency');
 
-const LABELS = Object.freeze({ daily: 'Recompensa diária', work: 'Trabalho', shop_purchase: 'Compra na loja' });
+const LABELS = Object.freeze({ daily: 'Recompensa diária', work: 'Trabalho', shop_purchase: 'Compra na loja', crime_reward: 'Crime bem-sucedido', crime_fine: 'Multa policial' });
 
 module.exports = {
   data: new SlashCommandBuilder().setName('extrato').setDescription('Mostra suas últimas movimentações de moedas')
