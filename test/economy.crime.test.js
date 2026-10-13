@@ -1,16 +1,19 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { Collection } = require('discord.js');
 const { db, setGuildConfig } = require('../database/db');
 const { setGuildEmoji, resetGuildEmojis } = require('../utils/emojis');
 const { ITEMS } = require('../utils/economy/shop');
 const { JOBS } = require('../utils/economy/jobs');
 const { changeBalance, claimReward, commitCrime, CRIMES, CRIME_COOLDOWN_MS } = require('../utils/economy/service');
 const economy = require('../utils/economy/repository');
-const { getUserState } = require('../utils/levels/service');
+const { getUserState, changeXp } = require('../utils/levels/service');
 const command = require('../commands/economy/crime');
 
 const GUILD = 'test-economy-crime';
 const USER = 'test-criminal';
+const IGNORED_ROLE = '900000000000000010';
+const ANNOUNCE_CHANNEL = '900000000000000011';
 
 function cleanup() {
   resetGuildEmojis();
@@ -89,6 +92,46 @@ test('economia e níveis desativados impedem ganhos indevidos', () => {
   assert.ok(result.amount > 0);
   assert.equal(result.xp, 0);
   assert.equal(getUserState(GUILD, USER).totalXp, 0);
+});
+
+test('cargo ignorado bloqueia só o XP, preservando saldo e cooldown do crime', () => {
+  cleanup();
+  setGuildConfig(GUILD, 'levels_config', JSON.stringify({ enabled: true, ignoredRoleIds: [IGNORED_ROLE] }));
+  const member = { roles: { cache: new Collection([[IGNORED_ROLE, { id: IGNORED_ROLE }]]) } };
+  const result = commitCrime({ guildId: GUILD, userId: USER, member, now: 1000,
+    roll: (min, max) => max - 1 });
+  assert.ok(result.amount > 0);
+  assert.equal(result.xp, 0);
+  assert.equal(result.xpChange, null);
+  assert.equal(getUserState(GUILD, USER).totalXp, 0);
+  assert.equal(economy.getBalance(GUILD, USER), result.balance);
+  assert.equal(economy.getTransactions(GUILD, USER)[0].type, 'crime_reward');
+  assert.equal(commitCrime({ guildId: GUILD, userId: USER, member, now: 1000,
+    roll: () => { throw Error('não deve sortear'); } }).retryAt, 1000 + CRIME_COOLDOWN_MS);
+});
+
+test('promoção pelo comando anuncia no canal configurado', async () => {
+  cleanup();
+  setGuildConfig(GUILD, 'levels_config', JSON.stringify({ enabled: true, announceEnabled: true,
+    announceChannelId: ANNOUNCE_CHANNEL }));
+  changeXp({ guildId: GUILD, userId: USER, operation: 'set', amount: 99 });
+  const sent = [];
+  const target = { isTextBased: () => true, permissionsFor: () => ({ has: () => true }),
+    send: async (payload) => { sent.push(payload); } };
+  const ctx = interaction();
+  ctx.user.toString = () => `<@${USER}>`;
+  ctx.guild.channels = { cache: new Collection([[ANNOUNCE_CHANNEL, target]]) };
+  ctx.guild.members = { me: {} };
+  ctx.channel = { send: async () => { throw Error('anúncio no canal incorreto'); } };
+  for (let attempt = 0; attempt < 30 && getUserState(GUILD, USER).level === 0; attempt += 1) {
+    db.prepare('DELETE FROM economy_cooldowns WHERE guild_id = ?').run(GUILD);
+    await command.execute(ctx);
+  }
+  assert.equal(getUserState(GUILD, USER).level, 1);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].content, /nível \*\*1\*\*/);
+  assert.deepEqual(sent[0].allowedMentions, { users: [USER] });
+  assert.ok(ctx.calls.length > 0);
 });
 
 test('comando apresenta emojis globais e não paga de novo no cooldown', async () => {

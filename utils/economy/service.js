@@ -6,7 +6,7 @@ const { ITEMS } = require('./shop');
 const { JOBS } = require('./jobs');
 const { db } = require('../../database/db');
 const { changeXp } = require('../levels/service');
-const { getLevelsConfig } = require('../levels/config');
+const { getLevelsConfig, isMemberIgnored } = require('../levels/config');
 
 const CRIMES = Object.freeze([
   { name: 'furtar um doce da padaria', min: 40, max: 90, xp: 2, caught: 0.12, fine: 0.10 },
@@ -83,8 +83,8 @@ function purchaseItem({ guildId, userId, itemId }) {
   return { ...result, item };
 }
 
-/** @param {{guildId: string, userId: string, now?: number, roll?: (min: number, max: number) => number}} params */
-function commitCrime({ guildId, userId, now = Date.now(), roll = randomInt }) {
+/** @param {{guildId: string, userId: string, member?: import('discord.js').GuildMember|null, now?: number, roll?: (min: number, max: number) => number}} params */
+function commitCrime({ guildId, userId, member, now = Date.now(), roll = randomInt }) {
   validateIds(guildId, userId);
   if (!Number.isSafeInteger(now) || now < 0) throw new Error('Horário inválido.');
   if (!getEconomyConfig(guildId).enabled) throw new EconomyDisabledError();
@@ -105,9 +105,11 @@ function commitCrime({ guildId, userId, now = Date.now(), roll = randomInt }) {
     if (result.retryAt) return { retryAt: result.retryAt, balance: result.balance, crime: null, caught: false, amount: 0, xp: 0 };
     const selected = /** @type {{crime: typeof CRIMES[number], caught: boolean} | null} */ (outcome);
     if (!selected) throw new Error('Crime não selecionado.');
-    const xp = selected.caught || !getLevelsConfig(guildId).enabled ? 0
-      : changeXp({ guildId, userId, operation: 'add', amount: selected.crime.xp, source: 'crime' }).delta;
-    return { retryAt: null, balance: result.balance, crime: selected.crime.name, caught: selected.caught, amount: result.balance - result.previousBalance, xp };
+    const config = getLevelsConfig(guildId);
+    const xpChange = selected.caught || !config.enabled || isMemberIgnored(config, member) ? null
+      : changeXp({ guildId, userId, operation: 'add', amount: selected.crime.xp, source: 'crime' });
+    return { retryAt: null, balance: result.balance, crime: selected.crime.name, caught: selected.caught,
+      amount: result.balance - result.previousBalance, xp: xpChange?.delta ?? 0, xpChange };
   }).immediate();
 }
 
