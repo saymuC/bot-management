@@ -7,8 +7,8 @@ const { commitCrime, EconomyDisabledError } = require('../../utils/economy/servi
 const { formatMoney, formatWait } = require('../../utils/economy/formatter');
 const { currency } = require('../../utils/economy/currency');
 const { getLevelsConfig } = require('../../utils/levels/config');
-const { getUserState } = require('../../utils/levels/service');
 const { syncMemberRewards } = require('../../utils/levels/rewards');
+const { announceLevelUp } = require('../../handlers/levelsHandler');
 
 module.exports = {
   ephemeral: false,
@@ -18,7 +18,9 @@ module.exports = {
     if (!interaction.guild) throw new Error('Comando disponível apenas em servidores.');
     let result;
     try {
-      result = commitCrime({ guildId: interaction.guild.id, userId: interaction.user.id });
+      result = commitCrime({ guildId: interaction.guild.id, userId: interaction.user.id,
+        member: interaction.member && 'roles' in interaction.member
+          ? /** @type {import('discord.js').GuildMember} */ (interaction.member) : null });
     } catch (err) {
       if (!(err instanceof EconomyDisabledError)) throw err;
       return respond(interaction, { embeds: [baseEmbed({ title: `${emoji(interaction.guild, 'eco_coin')} Economia`, description: err.message })] });
@@ -29,15 +31,21 @@ module.exports = {
     })] });
     const { icon, name } = currency(interaction.guild);
     const guild = interaction.guild;
-    if (result.xp && interaction.member && 'roles' in interaction.member) {
+    if (result.xpChange?.direction === 'up') {
       const config = getLevelsConfig(guild.id);
       if (config.enabled) {
-        const member = /** @type {import('discord.js').GuildMember} */ (interaction.member);
-        try {
-          const sync = await syncMemberRewards(member, config, getUserState(guild.id, interaction.user.id).level, 'XP do /crime');
-          if (sync.problems.length) console.warn(`[crime] Recompensas em ${guild.id}: ${sync.problems.join(' · ')}`);
-        } catch (err) {
-          console.warn(`[crime] Falha ao sincronizar recompensas em ${guild.id}:`, err);
+        if (interaction.member && 'roles' in interaction.member) {
+          const member = /** @type {import('discord.js').GuildMember} */ (interaction.member);
+          try {
+            const sync = await syncMemberRewards(member, config, result.xpChange.newLevel, 'XP do /crime');
+            if (sync.problems.length) console.warn(`[crime] Recompensas em ${guild.id}: ${sync.problems.join(' · ')}`);
+          } catch (err) {
+            console.warn(`[crime] Falha ao sincronizar recompensas em ${guild.id}:`, err);
+          }
+        }
+        if (config.announceEnabled) {
+          await announceLevelUp({ guild, channel: interaction.channel, author: interaction.user }, config, result.xpChange)
+            .catch((err) => console.warn(`[crime] Falha ao anunciar level-up em ${guild.id}:`, err));
         }
       }
     }
