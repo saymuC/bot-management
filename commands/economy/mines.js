@@ -2,7 +2,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { respond } = require('../../utils/interactions');
 const { getEconomyConfig } = require('../../config/economy');
-const { getActiveGame, expireGame, attachActiveMessage } = require('../../utils/economy/mines/service');
+const { getActiveGame, getLatestGame, expireGame, attachActiveMessage } = require('../../utils/economy/mines/service');
 const { settingsPanel, renderGame, rememberPanelEditor } = require('../../handlers/minesHandler');
 const { errorEmbed } = require('../../utils/embeds');
 
@@ -24,6 +24,8 @@ module.exports = {
       if (message?.id) rememberPanelEditor(game.id, interaction.webhook, message.id, interaction.guild, interaction.user.id);
       return message;
     }
+    const latest = getLatestGame(interaction.guild.id, interaction.user.id);
+    if (latest && latest.status !== 'active') return respond(interaction, renderGame(interaction.guild, latest));
     return respond(interaction, settingsPanel(interaction.guild, interaction.user.id));
   },
 };

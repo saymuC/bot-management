@@ -17,11 +17,11 @@ function rememberPanelEditor(gameId, webhook, messageId, guild, userId) {
   if (!webhook?.editMessage || !messageId) return;
   const userKey = `${guild.id}:${userId}`;
   const previous = panelEditors.get(gameId);
-  previous?.webhook.deleteMessage?.(previous.messageId).catch(() => null);
+  if (previous && previous.messageId !== messageId) previous.webhook.deleteMessage?.(previous.messageId).catch(() => null);
   panelEditors.set(gameId, { webhook, messageId, guild, userKey });
   for (const [id, editor] of panelEditors) {
     if (id !== gameId && editor.userKey === userKey) {
-      editor.webhook.deleteMessage?.(editor.messageId).catch(() => null);
+      if (editor.messageId !== messageId) editor.webhook.deleteMessage?.(editor.messageId).catch(() => null);
       panelEditors.delete(id);
     }
   }
@@ -129,20 +129,31 @@ async function routeMinesInteraction(interaction) {
     }
   }
   if (['start', 'again'].includes(action) && interaction.isButton()) {
+    const alreadyAcknowledged = interaction.deferred || interaction.replied;
+    let updateAttempted = false;
     try {
       const prefs = mines.getPreferences(interaction.guild.id, interaction.user.id);
       const game = mines.createGame({ guildId: interaction.guild.id, userId: interaction.user.id, bet: prefs.bet, mineCount: prefs.mine_count });
-      await interaction.update(renderGame(interaction.guild, game));
-      mines.attachMessage(game.id, interaction.channelId, interaction.message.id);
-      rememberPanelEditor(game.id, interaction.webhook, interaction.message.id, interaction.guild, interaction.user.id);
+      if (alreadyAcknowledged) {
+        const message = await interaction.followUp({ ...renderGame(interaction.guild, game), flags: MessageFlags.Ephemeral });
+        mines.attachMessage(game.id, interaction.channelId, message.id);
+        rememberPanelEditor(game.id, interaction.webhook, message.id, interaction.guild, interaction.user.id);
+      } else {
+        updateAttempted = true;
+        await interaction.update(renderGame(interaction.guild, game));
+        mines.attachMessage(game.id, interaction.channelId, interaction.message.id);
+        rememberPanelEditor(game.id, interaction.webhook, interaction.message.id, interaction.guild, interaction.user.id);
+      }
       return;
     } catch (error) {
-      return interaction.reply({ embeds: [errorEmbed(error instanceof Error ? error.message : 'Não foi possível iniciar a partida.', undefined, interaction.guild)], flags: MessageFlags.Ephemeral });
+      if (updateAttempted) return;
+      return showInteractionError(interaction, error instanceof Error ? error.message : 'Não foi possível iniciar a partida.');
     }
   }
   const reveal = /^reveal_(\d+)_(\d+)_(\d+)$/.exec(action);
   const cashout = /^cashout_(\d+)_(\d+)$/.exec(action);
   if (!reveal && !cashout) return showInteractionError(interaction, 'Ação do Mines inválida.');
+  let updateAttempted = false;
   try {
     const match = reveal || cashout;
     if (!match) return;
@@ -150,21 +161,27 @@ async function routeMinesInteraction(interaction) {
     const game = reveal
       ? mines.revealCell({ ...params, position: Number(reveal[2]) })
       : mines.cashOut(params);
+    updateAttempted = true;
     const result = await interaction.update(renderGame(interaction.guild, game));
     rememberPanelEditor(game.id, interaction.webhook, interaction.message.id, interaction.guild, interaction.user.id);
     return result;
   } catch (error) {
+    if (updateAttempted) return;
     if (error instanceof Error && /painel ficou desatualizado/.test(error.message)) {
       const match = reveal || cashout;
       if (match) {
-        const game = mines.getGame(interaction.guild.id, interaction.user.id, Number(match[1]));
-        if (game) {
+      const gameId = Number(match[1]);
+      const currentRevision = mines.getGameRevision(interaction.guild.id, interaction.user.id, gameId);
+      const messageId = interaction.message.id;
+      const isRecentPanel = !panelEditors.has(gameId) || panelEditors.get(gameId).messageId === messageId;
+      const game = mines.getGame(interaction.guild.id, interaction.user.id, gameId);
+      if (game && currentRevision !== null && isRecentPanel) {
           rememberPanelEditor(game.id, interaction.webhook, interaction.message.id, interaction.guild, interaction.user.id);
           return interaction.update(renderGame(interaction.guild, game));
         }
       }
     }
-    return interaction.followUp({ embeds: [errorEmbed(error instanceof Error ? error.message : 'Não foi possível processar a jogada.', undefined, interaction.guild)], flags: MessageFlags.Ephemeral });
+    return showInteractionError(interaction, error instanceof Error ? error.message : 'Não foi possível processar a jogada.');
   }
 }
 
@@ -247,4 +264,4 @@ async function routeMinesConfig(interaction) {
   }
 }
 
-module.exports = { PREFIX, settingsPanel, renderGame, minesConfigPanel, routeMinesInteraction, routeMinesConfig, startMinesSweeper, sweepMines, rememberPanelEditor };
+module.exports = { PREFIX, settingsPanel, renderGame, minesConfigPanel, routeMinesInteraction, routeMinesConfig, startMinesSweeper, sweepMines, rememberPanelEditor, panelEditors };

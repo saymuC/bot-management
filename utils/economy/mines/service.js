@@ -6,6 +6,7 @@ const { generateBoard, BOARD_SIZE, payout, validateGame } = require('./engine');
 const balance = db.prepare('SELECT wallet FROM economy_accounts WHERE guild_id = ? AND user_id = ?');
 const active = db.prepare("SELECT * FROM economy_mines_games WHERE guild_id = ? AND user_id = ? AND status = 'active'");
 const gameById = db.prepare('SELECT * FROM economy_mines_games WHERE id = ? AND guild_id = ?');
+const latestGame = db.prepare('SELECT * FROM economy_mines_games WHERE guild_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1');
 const insertBalance = db.prepare(`INSERT INTO economy_accounts (guild_id, user_id, wallet) VALUES (?, ?, ?)
   ON CONFLICT(guild_id, user_id) DO UPDATE SET wallet = excluded.wallet, updated_at = CURRENT_TIMESTAMP`);
 const insertTransaction = db.prepare(`INSERT INTO economy_transactions
@@ -40,6 +41,16 @@ function getActiveGame(guildId, userId) {
 function getGame(guildId, userId, gameId) {
   const game = gameById.get(gameId, guildId);
   return game && game.user_id === userId ? publicGame(game, game.status !== 'active') : null;
+}
+
+function getLatestGame(guildId, userId) {
+  const game = latestGame.get(guildId, userId);
+  return game ? publicGame(game, game.status !== 'active') : null;
+}
+
+function getGameRevision(guildId, userId, gameId) {
+  const game = gameById.get(gameId, guildId);
+  return game?.user_id === userId ? game.revision : null;
 }
 
 function attachActiveMessage(guildId, userId, channelId, messageId) {
@@ -106,13 +117,15 @@ function createGame({ guildId, userId, bet, mineCount, now = Date.now(), randomB
 }
 
 function revealCell({ guildId, userId, gameId, position, revision, now = Date.now() }) {
-  if (!Number.isSafeInteger(gameId) || !Number.isSafeInteger(position) || position < 0 || position >= BOARD_SIZE) throw new Error('Jogada inválida.');
+  if (!Number.isSafeInteger(gameId) || !Number.isSafeInteger(position) || position < 0 || position >= BOARD_SIZE ||
+      !Number.isSafeInteger(revision) || revision < 0) throw new Error('Jogada inválida.');
+  if (!Number.isSafeInteger(revision) || revision < 0) throw new Error('Revisão de painel inválida.');
   return db.transaction(() => {
     const game = gameById.get(gameId, guildId);
     if (!game || game.user_id !== userId) throw new Error('Partida não encontrada ou não pertence a você.');
     if (game.status !== 'active') return publicGame(game, true);
     if (now >= game.expires_at) return publicGame(closeGame(game, 'expired', now, game.bet, 'mines_refund'), true);
-    if (Number.isSafeInteger(revision) && revision !== game.revision) throw new Error('Este painel ficou desatualizado. A partida foi atualizada em outro painel.');
+    if (revision !== game.revision) throw new Error('Este painel ficou desatualizado. A partida foi atualizada em outro painel.');
     const revealed = JSON.parse(game.revealed);
     if (revealed.includes(position)) throw new Error('Essa casa já foi selecionada.');
     const board = JSON.parse(game.board);
@@ -135,12 +148,14 @@ function revealCell({ guildId, userId, gameId, position, revision, now = Date.no
 }
 
 function cashOut({ guildId, userId, gameId, revision, now = Date.now() }) {
+  if (!Number.isSafeInteger(gameId) || !Number.isSafeInteger(revision) || revision < 0) throw new Error('Revisão de painel inválida.');
+  if (!Number.isSafeInteger(gameId) || !Number.isSafeInteger(revision) || revision < 0) throw new Error('Revisão de painel inválida.');
   return db.transaction(() => {
     const game = gameById.get(gameId, guildId);
     if (!game || game.user_id !== userId) throw new Error('Partida não encontrada ou não pertence a você.');
     if (game.status !== 'active') return publicGame(game, true);
     if (now >= game.expires_at) return publicGame(closeGame(game, 'expired', now, game.bet, 'mines_refund'), true);
-    if (Number.isSafeInteger(revision) && revision !== game.revision) throw new Error('Este painel ficou desatualizado. A partida foi atualizada em outro painel.');
+    if (revision !== game.revision) throw new Error('Este painel ficou desatualizado. A partida foi atualizada em outro painel.');
     const revealed = JSON.parse(game.revealed);
     if (revealed.length === 0) throw new Error('Revele ao menos uma casa segura antes de retirar.');
     const prize = payout(game.bet, game.mine_count, revealed.length, game.house_edge_bps);
@@ -162,7 +177,7 @@ function expireDueGames(now = Date.now()) {
   const pending = expiredGames.all(now);
   return pending.map((game) => {
     const resolved = expireGame({ guildId: game.guild_id, userId: game.user_id, gameId: game.id, now });
-    return resolved ? { ...resolved, channelId: game.channel_id, messageId: game.message_id } : null;
+    return resolved ? { ...resolved, channel_id: game.channel_id, message_id: game.message_id } : null;
   }).filter(Boolean);
 }
 
@@ -174,4 +189,4 @@ function refundAllActive(guildId, now = Date.now(), status = 'refunded') {
 
 function attachMessage(gameId, channelId, messageId) { updateMessage.run(channelId, messageId, gameId); }
 
-module.exports = { getBalance, getPreferences, getActiveGame, getGame, attachActiveMessage, setPreferences, createGame, revealCell, cashOut, expireGame, expireDueGames, refundAllActive, attachMessage };
+module.exports = { getBalance, getPreferences, getActiveGame, getGame, getLatestGame, getGameRevision, attachActiveMessage, setPreferences, createGame, revealCell, cashOut, expireGame, expireDueGames, refundAllActive, attachMessage };
