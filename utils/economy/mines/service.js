@@ -13,16 +13,16 @@ const insertTransaction = db.prepare(`INSERT INTO economy_transactions
   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
 const reserved = db.prepare("SELECT COALESCE(SUM(reserved_payout), 0) AS total FROM economy_mines_games WHERE guild_id = ? AND user_id = ? AND status = 'active'");
 const insertGame = db.prepare(`INSERT INTO economy_mines_games
-  (guild_id, user_id, bet, mine_count, house_edge_bps, board, reserved_payout, created_at, updated_at, expires_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  (guild_id, user_id, bet, mine_count, house_edge_bps, timeout_seconds, board, reserved_payout, created_at, updated_at, expires_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const updateGame = db.prepare(`UPDATE economy_mines_games SET revealed = ?, status = ?, payout = ?, updated_at = ?,
-  expires_at = ?, finished_at = ? WHERE id = ? AND status = 'active'`);
+  expires_at = ?, finished_at = ?, revision = revision + 1 WHERE id = ? AND status = 'active'`);
 const insertMove = db.prepare('INSERT INTO economy_mines_moves (game_id, position, move_number, safe, created_at) VALUES (?, ?, ?, ?, ?)');
 const updateMessage = db.prepare('UPDATE economy_mines_games SET channel_id = ?, message_id = ? WHERE id = ? AND status = \'active\'');
 const preferences = db.prepare('SELECT bet, mine_count FROM economy_mines_preferences WHERE guild_id = ? AND user_id = ?');
 const savePreferences = db.prepare(`INSERT INTO economy_mines_preferences (guild_id, user_id, bet, mine_count) VALUES (?, ?, ?, ?)
   ON CONFLICT(guild_id, user_id) DO UPDATE SET bet = excluded.bet, mine_count = excluded.mine_count`);
-const expiredGames = db.prepare("SELECT id, guild_id, user_id FROM economy_mines_games WHERE status = 'active' AND expires_at <= ? ORDER BY expires_at");
+const expiredGames = db.prepare("SELECT id, guild_id, user_id, channel_id, message_id FROM economy_mines_games WHERE status = 'active' AND expires_at <= ? ORDER BY expires_at");
 const activeGames = db.prepare("SELECT id, guild_id, user_id FROM economy_mines_games WHERE status = 'active'");
 
 function getBalance(guildId, userId) { return balance.get(guildId, userId)?.wallet ?? 0; }
@@ -35,6 +35,11 @@ function getPreferences(guildId, userId) {
 function getActiveGame(guildId, userId) {
   const game = active.get(guildId, userId);
   return game ? publicGame(game) : null;
+}
+
+function getGame(guildId, userId, gameId) {
+  const game = gameById.get(gameId, guildId);
+  return game && game.user_id === userId ? publicGame(game, game.status !== 'active') : null;
 }
 
 function attachActiveMessage(guildId, userId, channelId, messageId) {
@@ -91,7 +96,7 @@ function createGame({ guildId, userId, bet, mineCount, now = Date.now(), randomB
     if (previous < bet) throw new RangeError('Saldo insuficiente para essa aposta.');
     const reservedTotal = reserved.get(guildId, userId).total;
     if (MAX_BALANCE - (previous - bet) - reservedTotal < maxPayout) throw new RangeError('Não há capacidade de crédito suficiente para reservar o pagamento máximo desta partida.');
-    const id = insertGame.run(guildId, userId, bet, mineCount, config.mines.houseEdgeBps, JSON.stringify(board), maxPayout,
+    const id = insertGame.run(guildId, userId, bet, mineCount, config.mines.houseEdgeBps, config.mines.timeoutSeconds, JSON.stringify(board), maxPayout,
       now, now, now + config.mines.timeoutSeconds * 1000).lastInsertRowid;
     insertBalance.run(guildId, userId, previous - bet);
     insertTransaction.run(guildId, userId, 'mines_bet', -bet, previous, previous - bet, JSON.stringify({ gameId: id }), `mines:${id}:bet`);
@@ -100,12 +105,13 @@ function createGame({ guildId, userId, bet, mineCount, now = Date.now(), randomB
   }).immediate();
 }
 
-function revealCell({ guildId, userId, gameId, position, now = Date.now() }) {
+function revealCell({ guildId, userId, gameId, position, revision, now = Date.now() }) {
   if (!Number.isSafeInteger(gameId) || !Number.isSafeInteger(position) || position < 0 || position >= BOARD_SIZE) throw new Error('Jogada inválida.');
   return db.transaction(() => {
     const game = gameById.get(gameId, guildId);
     if (!game || game.user_id !== userId) throw new Error('Partida não encontrada ou não pertence a você.');
     if (game.status !== 'active') return publicGame(game, true);
+    if (Number.isSafeInteger(revision) && revision !== game.revision) throw new Error('Este painel ficou desatualizado. A partida foi atualizada em outro painel.');
     if (now >= game.expires_at) return publicGame(closeGame(game, 'expired', now, game.bet, 'mines_refund'), true);
     const revealed = JSON.parse(game.revealed);
     if (revealed.includes(position)) throw new Error('Essa casa já foi selecionada.');
@@ -123,16 +129,17 @@ function revealCell({ guildId, userId, gameId, position, now = Date.now() }) {
       const result = closeGame(next, 'won', now, prize, 'mines_payout');
       return publicGame({ ...result, board: game.board }, true);
     }
-    updateGame.run(JSON.stringify(revealed), 'active', 0, now, now + getEconomyConfig(guildId).mines.timeoutSeconds * 1000, null, game.id);
+    updateGame.run(JSON.stringify(revealed), 'active', 0, now, now + game.timeout_seconds * 1000, null, game.id);
     return publicGame(gameById.get(game.id, guildId));
   }).immediate();
 }
 
-function cashOut({ guildId, userId, gameId, now = Date.now() }) {
+function cashOut({ guildId, userId, gameId, revision, now = Date.now() }) {
   return db.transaction(() => {
     const game = gameById.get(gameId, guildId);
     if (!game || game.user_id !== userId) throw new Error('Partida não encontrada ou não pertence a você.');
     if (game.status !== 'active') return publicGame(game, true);
+    if (Number.isSafeInteger(revision) && revision !== game.revision) throw new Error('Este painel ficou desatualizado. A partida foi atualizada em outro painel.');
     if (now >= game.expires_at) return publicGame(closeGame(game, 'expired', now, game.bet, 'mines_refund'), true);
     const revealed = JSON.parse(game.revealed);
     if (revealed.length === 0) throw new Error('Revele ao menos uma casa segura antes de retirar.');
@@ -153,7 +160,10 @@ function expireGame({ guildId, userId, gameId, now = Date.now(), status = 'expir
 
 function expireDueGames(now = Date.now()) {
   const pending = expiredGames.all(now);
-  return pending.map((game) => expireGame({ guildId: game.guild_id, userId: game.user_id, gameId: game.id, now })).filter(Boolean);
+  return pending.map((game) => {
+    const resolved = expireGame({ guildId: game.guild_id, userId: game.user_id, gameId: game.id, now });
+    return resolved ? { ...resolved, channelId: game.channel_id, messageId: game.message_id } : null;
+  }).filter(Boolean);
 }
 
 /** @param {string|undefined} guildId @param {number} [now] @param {'expired'|'refunded'} [status] */
@@ -164,4 +174,4 @@ function refundAllActive(guildId, now = Date.now(), status = 'refunded') {
 
 function attachMessage(gameId, channelId, messageId) { updateMessage.run(channelId, messageId, gameId); }
 
-module.exports = { getBalance, getPreferences, getActiveGame, attachActiveMessage, setPreferences, createGame, revealCell, cashOut, expireGame, expireDueGames, refundAllActive, attachMessage };
+module.exports = { getBalance, getPreferences, getActiveGame, getGame, attachActiveMessage, setPreferences, createGame, revealCell, cashOut, expireGame, expireDueGames, refundAllActive, attachMessage };

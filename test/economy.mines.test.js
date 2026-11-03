@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
+const path = require('node:path');
 const { db, setGuildConfig } = require('../database/db');
 const { changeBalance } = require('../utils/economy/service');
 const mines = require('../utils/economy/mines/service');
@@ -7,6 +10,7 @@ const { BOARD_SIZE, generateBoard, survivalProbability, multiplier, payout } = r
 const { getEconomyConfig, saveEconomyConfig, MAX_BALANCE } = require('../config/economy');
 const { renderGame, settingsPanel, minesConfigPanel, routeMinesConfig } = require('../handlers/minesHandler');
 const { REGISTRY } = require('../utils/emojis');
+const execFileAsync = promisify(execFile);
 
 const GUILD = 'test-mines';
 const OTHER = 'test-mines-other';
@@ -29,6 +33,7 @@ test('engine gera minas únicas, calcula probabilidades e arredonda apenas pagam
   assert.equal(survivalProbability(3, 1), 0.85);
   assert.ok(Math.abs(multiplier(3, 1) - 0.97 / 0.85) < 1e-12);
   assert.equal(payout(1000, 3, 1), 1141);
+  assert.equal(require('../utils/economy/mines/engine').safePickCount([0, 1, 2], [3, 0]), 1);
   assert.equal(new Set(generateBoard(20, 8)).size, 8);
   assert.throws(() => generateBoard(20, 20), RangeError);
 });
@@ -70,19 +75,33 @@ test('mina, expiração, preferência e isolamento por servidor mantêm saldo co
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM economy_transactions WHERE type = 'mines_refund'").get().n, 1);
 });
 
-test('concorrência impede duas partidas ativas e a reserva protege o teto da carteira', async () => {
+test('processos concorrentes não iniciam duas partidas e reserva protege o teto da carteira', async () => {
   cleanup();
   setGuildConfig(GUILD, 'economy_config', JSON.stringify({ mines: { maxBet: 100, maxMines: 8 } }));
   assert.equal(getEconomyConfig(GUILD).mines.maxBet, 100);
   changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: 1000, source: 'test' });
-  const attempts = await Promise.allSettled([
-    Promise.resolve().then(() => mines.createGame({ guildId: GUILD, userId: USER, bet: 100, mineCount: 8, now })),
-    Promise.resolve().then(() => mines.createGame({ guildId: GUILD, userId: USER, bet: 100, mineCount: 8, now })),
-  ]);
-  assert.equal(attempts.filter((result) => result.status === 'fulfilled').length, 1);
+  const servicePath = path.join(__dirname, '..', 'utils', 'economy', 'mines', 'service.js');
+  const childScript = `setTimeout(() => { const { createGame } = require(${JSON.stringify(servicePath)}); try { createGame({ guildId: ${JSON.stringify(GUILD)}, userId: ${JSON.stringify(USER)}, bet: 100, mineCount: 8 }); console.log('CREATED'); } catch { console.log('REJECTED'); } require(${JSON.stringify(path.join(__dirname, '..', 'database', 'db.js'))}).db.close(); }, 40);`;
+  const runChild = () => execFileAsync(process.execPath, ['-e', childScript], { env: process.env, timeout: 10_000 });
+  const results = await Promise.all([runChild(), runChild()]);
+  const outcomes = results.map(({ stdout }) => stdout.trim().split(/\r?\n/).at(-1));
+  assert.deepEqual(outcomes.sort(), ['CREATED', 'REJECTED']);
   assert.equal(mines.getBalance(GUILD, USER), 900);
   assert.throws(() => changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: MAX_BALANCE, source: 'test' }), /limite excedido/);
   assert.throws(() => saveEconomyConfig(GUILD, { mines: { maxMines: 0 } }), /Configuração de Mines/);
+});
+
+test('a partida congela timeout e configurações subsequentes não alteram sua validade', () => {
+  cleanup();
+  changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: 1000, source: 'test' });
+  saveEconomyConfig(GUILD, { mines: { timeoutSeconds: 60 } });
+  const game = mines.createGame({ guildId: GUILD, userId: USER, bet: 100, mineCount: 3, now,
+    randomBoard: () => [0, 1, 2] });
+  assert.equal(game.timeout_seconds, 60);
+  saveEconomyConfig(GUILD, { mines: { timeoutSeconds: 600 } });
+  const revealed = mines.revealCell({ guildId: GUILD, userId: USER, gameId: game.id, position: 3, now: now + 10 });
+  assert.equal(revealed.expires_at, now + 60_010);
+  assert.equal(db.prepare('SELECT timeout_seconds FROM economy_mines_games WHERE id = ?').get(game.id).timeout_seconds, 60);
 });
 
 test('painel e tabuleiro cabem nos limites Discord e ocultam minas durante jogo ativo', () => {
@@ -124,7 +143,7 @@ test('jogada de outro usuário recebe recusa efêmera sem alterar o painel ou sa
   const game = mines.createGame({ guildId: GUILD, userId: USER, bet: 100, mineCount: 3, now,
     randomBoard: () => [0, 1, 2] });
   let warning;
-  const interaction = { guild: { id: GUILD }, user: { id: 'intruder' }, customId: `mines_reveal_${game.id}_4`,
+  const interaction = { guild: { id: GUILD }, user: { id: 'intruder' }, customId: `mines_reveal_${game.id}_4_0`,
     isButton: () => true, isModalSubmit: () => false, deferred: false, replied: false,
     deferUpdate: async () => { interaction.deferred = true; },
     editReply: async () => assert.fail('Outro jogador não pode editar a partida.'),
@@ -134,4 +153,42 @@ test('jogada de outro usuário recebe recusa efêmera sem alterar o painel ou sa
   assert.match(warning.embeds[0].toJSON().description, /não pertence a você/i);
   assert.equal(mines.getBalance(GUILD, USER), 900);
   assert.deepEqual(mines.getActiveGame(GUILD, USER).revealed, []);
+});
+
+test('painel antigo reconcilia o estado atual em uma única chamada e não repete a jogada', async () => {
+  cleanup();
+  changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: 1000, source: 'test' });
+  const game = mines.createGame({ guildId: GUILD, userId: USER, bet: 100, mineCount: 3, now,
+    randomBoard: () => [0, 1, 2] });
+  mines.revealCell({ guildId: GUILD, userId: USER, gameId: game.id, position: 3, revision: 0, now: now + 1 });
+  let updateCalls = 0;
+  let updated;
+  const interaction = { guild: { id: GUILD, name: 'Mines test' }, user: { id: USER }, customId: `mines_reveal_${game.id}_4_0`,
+    isButton: () => true, isModalSubmit: () => false, deferred: false, replied: false,
+    update: async (payload) => { updateCalls += 1; updated = payload; },
+    deferUpdate: async () => assert.fail('A interação deve ser atualizada com uma única chamada REST.'),
+    followUp: async (payload) => { updated = payload; } };
+  await require('../handlers/minesHandler').routeMinesInteraction(interaction);
+  assert.equal(updateCalls, 1);
+  assert.deepEqual(mines.getActiveGame(GUILD, USER).revealed, [3]);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM economy_mines_moves WHERE game_id = ?").get(game.id).n, 1);
+  assert.ok(updated.components[0].components[3].disabled);
+});
+
+test('sweeper expira e atualiza painel existente sem depender da edição para reembolsar', async () => {
+  cleanup();
+  changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: 1000, source: 'test' });
+  saveEconomyConfig(GUILD, { mines: { timeoutSeconds: 60 } });
+  const game = mines.createGame({ guildId: GUILD, userId: USER, bet: 100, mineCount: 3, now,
+    randomBoard: () => [0, 1, 2] });
+  mines.attachMessage(game.id, 'channel-id', 'message-id');
+  let edited;
+  const guild = { id: GUILD, name: 'Mines test' };
+  const message = { guild, edit: async (payload) => { edited = payload; } };
+  const client = { channels: { fetch: async () => ({ isTextBased: () => true,
+    messages: { fetch: async () => message } }) } };
+  const count = await require('../handlers/minesHandler').sweepMines(client, now + 60_001);
+  assert.equal(count, 1);
+  assert.match(edited.embeds[0].toJSON().description, /devolvida/);
+  assert.equal(mines.getBalance(GUILD, USER), 1000);
 });

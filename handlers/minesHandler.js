@@ -7,7 +7,7 @@ const { formatMoney } = require('../utils/economy/formatter');
 const { getEconomyConfig, saveEconomyConfig } = require('../config/economy');
 const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
 const mines = require('../utils/economy/mines/service');
-const { multiplier, payout, BOARD_SIZE } = require('../utils/economy/mines/engine');
+const { multiplier, payout, safePickCount, BOARD_SIZE } = require('../utils/economy/mines/engine');
 
 const PREFIX = 'mines_';
 const CONFIG_PREFIX = 'eco_cfg_mines_';
@@ -40,14 +40,20 @@ function renderGame(guild, game) {
   const finished = game.status !== 'active';
   const won = game.status === 'won';
   const lost = game.status === 'lost';
-  const activeMultiplier = multiplier(game.mine_count, revealed.size, game.house_edge_bps);
-  const potential = revealed.size ? payout(game.bet, game.mine_count, revealed.size, game.house_edge_bps) : game.bet;
-  let description = `Aposta: **${formatMoney(game.bet)} ${currency(guild).name}** · ${game.mine_count} minas\n` +
-    `Multiplicador: **${activeMultiplier.toFixed(2)}x** · Ganho potencial: **${formatMoney(potential)}**`;
+  const safePicks = finished && game.board ? safePickCount(game.board, game.revealed) : revealed.size;
+  const activeMultiplier = multiplier(game.mine_count, safePicks, game.house_edge_bps);
+  const potential = safePicks ? payout(game.bet, game.mine_count, safePicks, game.house_edge_bps) : game.bet;
+  let description = 'Selecione casas seguras; cada acerto aumenta o pagamento disponível.';
   if (won) description += `\n\n${emoji(guild, 'eco_mines_cashout')} Retirada concluída: **${formatMoney(game.payout)} ${currency(guild).name}**.`;
   else if (lost) description += `\n\n${emoji(guild, 'eco_mines')} Mina encontrada. A aposta foi perdida.`;
   else if (game.status === 'expired' || game.status === 'refunded') description += '\n\nPartida encerrada; a aposta foi devolvida.';
-  else description += '\nSelecione uma casa. Cada casa segura aumenta o multiplicador.';
+  const fields = [
+    { name: 'Aposta', value: `${formatMoney(game.bet)} ${currency(guild).name}`, inline: true },
+    { name: 'Minas', value: String(game.mine_count), inline: true },
+    { name: 'Multiplicador', value: `${activeMultiplier.toFixed(2)}x`, inline: true },
+    { name: 'Ganho potencial', value: `${formatMoney(potential)} ${currency(guild).name}`, inline: true },
+  ];
+  if (won) fields.push({ name: 'Lucro líquido', value: `${formatMoney(game.payout - game.bet)} ${currency(guild).name}`, inline: true });
 
   const rows = [];
   for (let row = 0; row < 4; row += 1) {
@@ -57,7 +63,7 @@ function renderGame(guild, game) {
       const isRevealed = revealed.has(position);
       const isMine = finished && game.board.includes(position);
       const style = isMine ? ButtonStyle.Danger : isRevealed ? ButtonStyle.Success : ButtonStyle.Secondary;
-      const button = new ButtonBuilder().setCustomId(`${PREFIX}reveal_${game.id}_${position}`).setLabel(String(position + 1))
+      const button = new ButtonBuilder().setCustomId(`${PREFIX}reveal_${game.id}_${position}_${game.revision ?? 0}`).setLabel(String(position + 1))
         .setStyle(style).setDisabled(finished || isRevealed);
       if (isMine) button.setEmoji(emoji(guild, 'eco_mines'));
       else if (isRevealed) button.setEmoji(emoji(guild, 'eco_mines_safe'));
@@ -66,10 +72,10 @@ function renderGame(guild, game) {
     rows.push(new ActionRowBuilder().addComponents(buttons).toJSON());
   }
   rows.push(new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`${PREFIX}cashout_${game.id}`).setLabel(finished ? 'Partida encerrada' : `Retirar ${formatMoney(potential)}`)
+    new ButtonBuilder().setCustomId(`${PREFIX}cashout_${game.id}_${game.revision ?? 0}`).setLabel(finished ? 'Partida encerrada' : `Retirar ${formatMoney(potential)}`)
       .setEmoji(emoji(guild, 'eco_mines_cashout')).setStyle(ButtonStyle.Success).setDisabled(finished || revealed.size === 0),
   ).toJSON());
-  return { embeds: [baseEmbed({ title: `${emoji(guild, 'eco_mines')} Mines · partida #${game.id}`, description })], components: rows };
+  return { embeds: [baseEmbed({ title: `${emoji(guild, 'eco_mines')} Mines · partida #${game.id}`, description, fields })], components: rows };
 }
 
 async function showInteractionError(interaction, message) {
@@ -116,19 +122,25 @@ async function routeMinesInteraction(interaction) {
       return interaction.reply({ embeds: [errorEmbed(error instanceof Error ? error.message : 'Não foi possível iniciar a partida.', undefined, interaction.guild)], flags: MessageFlags.Ephemeral });
     }
   }
-  const reveal = /^reveal_(\d+)_(\d+)$/.exec(action);
-  const cashout = /^cashout_(\d+)$/.exec(action);
+  const reveal = /^reveal_(\d+)_(\d+)_(\d+)$/.exec(action);
+  const cashout = /^cashout_(\d+)_(\d+)$/.exec(action);
   if (!reveal && !cashout) return showInteractionError(interaction, 'Ação do Mines inválida.');
-  await interaction.deferUpdate();
   try {
     const match = reveal || cashout;
     if (!match) return;
-    const params = { guildId: interaction.guild.id, userId: interaction.user.id, gameId: Number(match[1]) };
+    const params = { guildId: interaction.guild.id, userId: interaction.user.id, gameId: Number(match[1]), revision: Number(match.at(-1)) };
     const game = reveal
       ? mines.revealCell({ ...params, position: Number(reveal[2]) })
       : mines.cashOut(params);
-    return interaction.editReply(renderGame(interaction.guild, game));
+    return interaction.update(renderGame(interaction.guild, game));
   } catch (error) {
+    if (error instanceof Error && /painel ficou desatualizado/.test(error.message)) {
+      const match = reveal || cashout;
+      if (match) {
+        const game = mines.getGame(interaction.guild.id, interaction.user.id, Number(match[1]));
+        if (game) return interaction.update(renderGame(interaction.guild, game));
+      }
+    }
     return interaction.followUp({ embeds: [errorEmbed(error instanceof Error ? error.message : 'Não foi possível processar a jogada.', undefined, interaction.guild)], flags: MessageFlags.Ephemeral });
   }
 }
@@ -150,10 +162,22 @@ function minesConfigPanel(guild) {
   };
 }
 
-function startMinesSweeper() {
+async function sweepMines(client, now = Date.now()) {
+  const expiredGames = mines.expireDueGames(now);
+  if (!client) return expiredGames.length;
+  await Promise.all(expiredGames.map(async (game) => {
+    if (!game.channel_id || !game.message_id) return;
+    const channel = await client.channels.fetch(game.channel_id).catch(() => null);
+    if (!channel?.isTextBased() || !channel.messages) return;
+    const message = await channel.messages.fetch(game.message_id).catch(() => null);
+    if (message) await message.edit(renderGame(message.guild, game)).catch(() => null);
+  }));
+  return expiredGames.length;
+}
+
+function startMinesSweeper(client) {
   const sweep = () => {
-    try { mines.expireDueGames(); }
-    catch (error) { console.error('[mines] Erro ao reembolsar partidas expiradas:', error); }
+    sweepMines(client).catch((error) => console.error('[mines] Erro ao reembolsar partidas expiradas:', error));
   };
   sweep();
   setInterval(sweep, 30_000).unref();
@@ -195,4 +219,4 @@ async function routeMinesConfig(interaction) {
   }
 }
 
-module.exports = { PREFIX, settingsPanel, renderGame, minesConfigPanel, routeMinesInteraction, routeMinesConfig, startMinesSweeper };
+module.exports = { PREFIX, settingsPanel, renderGame, minesConfigPanel, routeMinesInteraction, routeMinesConfig, startMinesSweeper, sweepMines };

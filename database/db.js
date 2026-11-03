@@ -211,11 +211,13 @@ CREATE TABLE IF NOT EXISTS economy_mines_games (
   bet INTEGER NOT NULL CHECK (bet > 0),
   mine_count INTEGER NOT NULL CHECK (mine_count BETWEEN 1 AND 19),
   house_edge_bps INTEGER NOT NULL CHECK (house_edge_bps BETWEEN 0 AND 9999),
+  timeout_seconds INTEGER NOT NULL DEFAULT 300 CHECK (timeout_seconds BETWEEN 1 AND 86400),
   board TEXT NOT NULL,
   revealed TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'won', 'lost', 'expired', 'refunded')),
   payout INTEGER NOT NULL DEFAULT 0,
   reserved_payout INTEGER NOT NULL DEFAULT 0,
+  revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
   channel_id TEXT,
   message_id TEXT,
   created_at INTEGER NOT NULL,
@@ -289,6 +291,8 @@ const CONFIG_FIELDS = [
 
 for (const column of CONFIG_FIELDS) ensureColumn('guild_config', column, 'TEXT');
 ensureColumn('economy_transactions', 'operation_key', 'TEXT');
+ensureColumn('economy_mines_games', 'timeout_seconds', 'INTEGER NOT NULL DEFAULT 300');
+ensureColumn('economy_mines_games', 'revision', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('tickets', 'claimed_by', 'TEXT');
 ensureColumn('tickets', 'created_at', 'TEXT DEFAULT CURRENT_TIMESTAMP');
 ensureColumn('tickets', 'claimed_at', 'TEXT');

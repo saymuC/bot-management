@@ -17,10 +17,7 @@ module.exports = {
       return respond(interaction, { embeds: [errorEmbed('Mines está desativado neste servidor.', undefined, interaction.guild)] });
     }
     let game = getActiveGame(interaction.guild.id, interaction.user.id);
-    if (game && game.expires_at <= Date.now()) {
-      expireGame({ guildId: interaction.guild.id, userId: interaction.user.id, gameId: game.id });
-      game = null;
-    }
+    if (game && game.expires_at <= Date.now()) game = expireGame({ guildId: interaction.guild.id, userId: interaction.user.id, gameId: game.id });
     if (game) {
       const message = await respond(interaction, renderGame(interaction.guild, game));
       if (message?.id) attachActiveMessage(interaction.guild.id, interaction.user.id, interaction.channelId, message.id);

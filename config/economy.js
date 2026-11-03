@@ -4,6 +4,7 @@ const DAILY = Object.freeze({ min: 300, max: 500, cooldownMs: 24 * 60 * 60 * 100
 const WORK = Object.freeze({ min: 150, max: 300, cooldownMs: 30 * 60 * 1000 });
 const { getGuildConfig, setGuildConfig } = require('../database/db');
 const { db } = require('../database/db');
+const { BOARD_SIZE, payout } = require('../utils/economy/mines/engine');
 const MINES_DEFAULT = Object.freeze({ enabled: true, minBet: 50, maxBet: 8_000, maxMines: 8, houseEdgeBps: 300, timeoutSeconds: 300 });
 /** @typedef {{ enabled: boolean, minBet: number, maxBet: number, maxMines: number, houseEdgeBps: number, timeoutSeconds: number }} MinesConfig */
 /** @typedef {{ enabled: boolean, dailyMin: number, dailyMax: number, workMin: number, workMax: number, workCooldownMinutes: number, currencyName: string, currencyEmoji: string|null, mines: MinesConfig }} EconomyConfig */
@@ -76,11 +77,13 @@ function saveEconomyConfig(guildId, changes) {
         !Number.isSafeInteger(mines.timeoutSeconds) || mines.timeoutSeconds < 60 || mines.timeoutSeconds > 3600) {
       throw new Error('Configuração de Mines fora dos limites permitidos.');
     }
-    const { payout } = require('../utils/economy/mines/engine');
-    if (payout(mines.maxBet, mines.maxMines, 20 - mines.maxMines, mines.houseEdgeBps) > MAX_BALANCE) {
+    next.mines = mines;
+  }
+  if (next.mines.maxMines > Math.min(8, Math.floor(BOARD_SIZE - 1))) throw new Error('Quantidade máxima de minas inválida.');
+  for (let mines = 1; mines <= next.mines.maxMines; mines += 1) {
+    if (payout(next.mines.maxBet, mines, BOARD_SIZE - mines, next.mines.houseEdgeBps) > MAX_BALANCE) {
       throw new Error('A configuração permite pagamentos acima do limite da carteira.');
     }
-    next.mines = mines;
   }
   const save = () => {
     setGuildConfig(guildId, 'economy_config', JSON.stringify(next));

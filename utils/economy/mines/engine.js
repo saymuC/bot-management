@@ -47,4 +47,9 @@ function payout(bet, mineCount, safePicks, houseEdgeBps = 300) {
   return amount;
 }
 
-module.exports = { BOARD_SIZE, generateBoard, survivalProbability, multiplier, payout, validateGame };
+function safePickCount(board, revealed) {
+  const mines = new Set(board);
+  return revealed.reduce((count, position) => count + (mines.has(position) ? 0 : 1), 0);
+}
+
+module.exports = { BOARD_SIZE, generateBoard, survivalProbability, multiplier, payout, safePickCount, validateGame };

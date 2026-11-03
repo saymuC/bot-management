@@ -14,6 +14,6 @@ module.exports = {
     startPresenceKeeper(client);
 
     startGiveawaySweeper(client);
-    startMinesSweeper();
+    startMinesSweeper(client);
   },
 };
