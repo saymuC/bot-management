@@ -38,8 +38,8 @@ test('painel autoriza admin, mostra modal e salva recompensas', async () => {
     update: async (payload) => assert.match(payload.embeds[0].toJSON().fields[2].value, /301 a 401/),
   });
   assert.equal(getEconomyConfig(ID).workCooldownMinutes, 45);
-  assert.equal(buildEconomyPanel(guild).components.length, 2);
-  assert.equal(buildEconomyPanel(guild).components[1].components[0].custom_id, 'eco_cfg_close');
+  assert.equal(buildEconomyPanel(guild).components.length, 1);
+  assert.equal(buildEconomyPanel(guild).components[0].components[3].custom_id, 'eco_cfg_mines');
 });
 
 test('modal inválido responde sem alterar valores e toggle muda o status', async () => {

@@ -11,9 +11,13 @@ const setCooldownStmt = db.prepare(`INSERT INTO economy_cooldowns (guild_id, use
   ON CONFLICT(guild_id, user_id, action) DO UPDATE SET expires_at = excluded.expires_at`);
 const inventoryStmt = db.prepare(`INSERT INTO economy_inventory (guild_id, user_id, item_id, quantity) VALUES (?, ?, ?, 1)
   ON CONFLICT(guild_id, user_id, item_id) DO UPDATE SET quantity = quantity + 1`);
+const reservedStmt = db.prepare("SELECT COALESCE(SUM(reserved_payout), 0) AS total FROM economy_mines_games WHERE guild_id = ? AND user_id = ? AND status = 'active'");
 
 /** @param {string} guildId @param {string} userId */
 function getBalance(guildId, userId) { return balanceStmt.get(guildId, userId)?.wallet ?? 0; }
+/** Moedas não comprometidas com pagamentos de jogos ativos. */
+function getReservedPayout(guildId, userId) { return reservedStmt.get(guildId, userId).total; }
+function getAvailableBalance(guildId, userId) { return Math.max(0, 1_000_000_000 - getBalance(guildId, userId) - getReservedPayout(guildId, userId)); }
 
 /** @param {string} guildId @param {string} userId @param {(balance: number, onCooldown: (action: string, now: number) => boolean) => { balance: number, source: string, metadata?: object, cooldown?: { action: string, expiresAt: number, now: number }, itemId?: string }} resolve */
 const balanceTransaction = db.transaction((guildId, userId, resolve) => {
@@ -57,4 +61,4 @@ function getTransactions(guildId, userId, limit = 20) { return historyStmt.all(g
 /** @param {string} guildId @param {string} userId */
 function getInventory(guildId, userId) { return itemsStmt.all(guildId, userId); }
 
-module.exports = { getBalance, applyBalance, leaderboardPage, rankOf, participantCount, getTransactions, getInventory };
+module.exports = { getBalance, getAvailableBalance, getReservedPayout, applyBalance, leaderboardPage, rankOf, participantCount, getTransactions, getInventory };

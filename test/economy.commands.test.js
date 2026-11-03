@@ -14,7 +14,8 @@ guild.client = { users: { cache: new Map(), fetch: async () => null } };
 
 function cleanup() {
   db.prepare('DELETE FROM guild_config WHERE guild_id = ?').run(GUILD);
-  for (const table of ['economy_cooldowns', 'economy_transactions', 'economy_accounts']) {
+  db.prepare('DELETE FROM economy_mines_moves WHERE game_id IN (SELECT id FROM economy_mines_games WHERE guild_id = ?)').run(GUILD);
+  for (const table of ['economy_mines_games', 'economy_mines_preferences', 'economy_cooldowns', 'economy_transactions', 'economy_accounts']) {
     db.prepare(`DELETE FROM ${table} WHERE guild_id = ?`).run(GUILD);
   }
 }

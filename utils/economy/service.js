@@ -42,7 +42,9 @@ function changeBalance({ guildId, userId, operation, amount, source, metadata })
   if (!['add', 'remove', 'set'].includes(operation) || !source?.trim()) throw new Error('Operação ou origem inválida.');
   const result = repository.applyBalance(guildId, userId, (balance) => {
     const next = operation === 'set' ? amount : balance + (operation === 'add' ? amount : -amount);
-    if (next < 0 || next > MAX_BALANCE) throw new RangeError('Saldo insuficiente ou limite excedido.');
+    if (next < 0 || next > MAX_BALANCE - repository.getReservedPayout(guildId, userId)) {
+      throw new RangeError('Saldo insuficiente ou limite excedido.');
+    }
     return { balance: next, source, metadata };
   });
   return { guildId, userId, previousBalance: result.previousBalance, balance: result.balance,
@@ -62,7 +64,7 @@ function claimReward({ guildId, userId, action, now = Date.now(), roll = randomI
     if (onCooldown(action, now)) return { balance, source: action,
       cooldown: { action, now, expiresAt: now + config.cooldownMs } };
     const reward = rewardBetween(config.min, config.max, roll);
-    if (balance + reward > MAX_BALANCE) throw new RangeError('Seu saldo atingiu o limite.');
+    if (reward > repository.getAvailableBalance(guildId, userId)) throw new RangeError('Seu saldo atingiu o limite reservado.');
     return { balance: balance + reward, source: action,
       cooldown: { action, now, expiresAt: now + config.cooldownMs } };
   });
@@ -98,7 +100,7 @@ function commitCrime({ guildId, userId, member, now = Date.now(), roll = randomI
       const caught = roll(0, 100) < crime.caught * 100;
       outcome = { crime, caught };
       const amount = caught ? -Math.min(balance, Math.ceil(balance * crime.fine))
-        : Math.min(rewardBetween(crime.min, crime.max, roll), MAX_BALANCE - balance);
+        : Math.min(rewardBetween(crime.min, crime.max, roll), repository.getAvailableBalance(guildId, userId));
       return { balance: balance + amount, source: caught ? 'crime_fine' : 'crime_reward',
         metadata: { crime: crime.name }, cooldown: { action: 'crime', now, expiresAt: now + CRIME_COOLDOWN_MS } };
     });

@@ -15,6 +15,7 @@ const { routeConfigCenter } = require('../handlers/configCenterHandler');
 const { handleTopPagination } = require('../handlers/levelsLeaderboardHandler');
 const { handleRankingPagination } = require('../handlers/economyLeaderboardHandler');
 const { routeEconomyConfig } = require('../handlers/economyHandler');
+const { routeMinesInteraction } = require('../handlers/minesHandler');
 const { routePermissionsSetup } = require('../handlers/permissionsSetupHandler');
 const { buildAvatarEmbed, buildPermissionsEmbeds } = require('../commands/user/info');
 const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
@@ -115,6 +116,11 @@ module.exports = {
 
       // ---- Botões / selects / modals roteados por customId ----
       const customId = interaction.customId ?? '';
+
+      if (customId.startsWith('mines_')) {
+        await routeMinesInteraction(interaction);
+        return;
+      }
 
       if (interaction.isButton() && customId.startsWith('userinfo_')) {
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
