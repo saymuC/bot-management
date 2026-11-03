@@ -111,8 +111,8 @@ function revealCell({ guildId, userId, gameId, position, revision, now = Date.no
     const game = gameById.get(gameId, guildId);
     if (!game || game.user_id !== userId) throw new Error('Partida não encontrada ou não pertence a você.');
     if (game.status !== 'active') return publicGame(game, true);
-    if (Number.isSafeInteger(revision) && revision !== game.revision) throw new Error('Este painel ficou desatualizado. A partida foi atualizada em outro painel.');
     if (now >= game.expires_at) return publicGame(closeGame(game, 'expired', now, game.bet, 'mines_refund'), true);
+    if (Number.isSafeInteger(revision) && revision !== game.revision) throw new Error('Este painel ficou desatualizado. A partida foi atualizada em outro painel.');
     const revealed = JSON.parse(game.revealed);
     if (revealed.includes(position)) throw new Error('Essa casa já foi selecionada.');
     const board = JSON.parse(game.board);
@@ -139,8 +139,8 @@ function cashOut({ guildId, userId, gameId, revision, now = Date.now() }) {
     const game = gameById.get(gameId, guildId);
     if (!game || game.user_id !== userId) throw new Error('Partida não encontrada ou não pertence a você.');
     if (game.status !== 'active') return publicGame(game, true);
-    if (Number.isSafeInteger(revision) && revision !== game.revision) throw new Error('Este painel ficou desatualizado. A partida foi atualizada em outro painel.');
     if (now >= game.expires_at) return publicGame(closeGame(game, 'expired', now, game.bet, 'mines_refund'), true);
+    if (Number.isSafeInteger(revision) && revision !== game.revision) throw new Error('Este painel ficou desatualizado. A partida foi atualizada em outro painel.');
     const revealed = JSON.parse(game.revealed);
     if (revealed.length === 0) throw new Error('Revele ao menos uma casa segura antes de retirar.');
     const prize = payout(game.bet, game.mine_count, revealed.length, game.house_edge_bps);

@@ -11,6 +11,21 @@ const { multiplier, payout, safePickCount, BOARD_SIZE } = require('../utils/econ
 
 const PREFIX = 'mines_';
 const CONFIG_PREFIX = 'eco_cfg_mines_';
+const panelEditors = new Map();
+
+function rememberPanelEditor(gameId, webhook, messageId, guild, userId) {
+  if (!webhook?.editMessage || !messageId) return;
+  const userKey = `${guild.id}:${userId}`;
+  const previous = panelEditors.get(gameId);
+  previous?.webhook.deleteMessage?.(previous.messageId).catch(() => null);
+  panelEditors.set(gameId, { webhook, messageId, guild, userKey });
+  for (const [id, editor] of panelEditors) {
+    if (id !== gameId && editor.userKey === userKey) {
+      editor.webhook.deleteMessage?.(editor.messageId).catch(() => null);
+      panelEditors.delete(id);
+    }
+  }
+}
 
 function settingsPanel(guild, userId) {
   const config = getEconomyConfig(guild.id);
@@ -20,13 +35,13 @@ function settingsPanel(guild, userId) {
   return {
     embeds: [baseEmbed({
       title: `${emoji(guild, 'eco_mines')} Mines`,
-      description: `Saldo disponível: ${coin} **${formatMoney(balance)} ${currency(guild).name}**\nConfigure e inicie uma partida com moedas da economia do servidor.`,
+      description: `Saldo disponível: ${coin} **${formatMoney(balance)} ${currency(guild).name}**\nEscolha a aposta e as minas para iniciar.`,
       fields: [
         { name: 'Aposta', value: `${formatMoney(prefs.bet)} ${currency(guild).name}`, inline: true },
         { name: 'Minas', value: String(prefs.mine_count), inline: true },
-        { name: 'Tabuleiro', value: `${BOARD_SIZE} casas · ${getEconomyConfig(guild.id).mines.timeoutSeconds}s por inatividade`, inline: true },
+        { name: 'Tabuleiro', value: `${BOARD_SIZE} casas`, inline: true },
       ],
-      footer: 'O tabuleiro e o estado da partida ficam salvos; uma partida ativa pode ser retomada com /mines.',
+      footer: `${getEconomyConfig(guild.id).mines.timeoutSeconds}s de inatividade · retome uma partida ativa com /mines`,
     })],
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`${PREFIX}settings`).setLabel('Aposta e minas').setStyle(ButtonStyle.Secondary),
@@ -41,6 +56,7 @@ function renderGame(guild, game) {
   const won = game.status === 'won';
   const lost = game.status === 'lost';
   const safePicks = finished && game.board ? safePickCount(game.board, game.revealed) : revealed.size;
+  const board = game.board ?? [];
   const activeMultiplier = multiplier(game.mine_count, safePicks, game.house_edge_bps);
   const potential = safePicks ? payout(game.bet, game.mine_count, safePicks, game.house_edge_bps) : game.bet;
   let description = 'Selecione casas seguras; cada acerto aumenta o pagamento disponível.';
@@ -61,7 +77,7 @@ function renderGame(guild, game) {
     for (let col = 0; col < 5; col += 1) {
       const position = row * 5 + col;
       const isRevealed = revealed.has(position);
-      const isMine = finished && game.board.includes(position);
+      const isMine = finished && board.includes(position);
       const style = isMine ? ButtonStyle.Danger : isRevealed ? ButtonStyle.Success : ButtonStyle.Secondary;
       const button = new ButtonBuilder().setCustomId(`${PREFIX}reveal_${game.id}_${position}_${game.revision ?? 0}`).setLabel(String(position + 1))
         .setStyle(style).setDisabled(finished || isRevealed);
@@ -72,10 +88,12 @@ function renderGame(guild, game) {
     rows.push(new ActionRowBuilder().addComponents(buttons).toJSON());
   }
   rows.push(new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`${PREFIX}cashout_${game.id}_${game.revision ?? 0}`).setLabel(finished ? 'Partida encerrada' : `Retirar ${formatMoney(potential)}`)
-      .setEmoji(emoji(guild, 'eco_mines_cashout')).setStyle(ButtonStyle.Success).setDisabled(finished || revealed.size === 0),
+    finished
+      ? new ButtonBuilder().setCustomId(`${PREFIX}again`).setLabel('Jogar novamente').setEmoji(emoji(guild, 'eco_mines')).setStyle(ButtonStyle.Primary)
+      : new ButtonBuilder().setCustomId(`${PREFIX}cashout_${game.id}_${game.revision ?? 0}`).setLabel(`Retirar ${formatMoney(potential)}`)
+        .setEmoji(emoji(guild, 'eco_mines_cashout')).setStyle(ButtonStyle.Success).setDisabled(revealed.size === 0),
   ).toJSON());
-  return { embeds: [baseEmbed({ title: `${emoji(guild, 'eco_mines')} Mines · partida #${game.id}`, description, fields })], components: rows };
+  return { embeds: [baseEmbed({ title: `${emoji(guild, 'eco_mines')} Mines`, description, fields, footer: `Partida #${game.id}` })], components: rows };
 }
 
 async function showInteractionError(interaction, message) {
@@ -110,13 +128,13 @@ async function routeMinesInteraction(interaction) {
       return showInteractionError(interaction, error instanceof Error ? error.message : 'Configuração inválida.');
     }
   }
-  if (action === 'start' && interaction.isButton()) {
+  if (['start', 'again'].includes(action) && interaction.isButton()) {
     try {
       const prefs = mines.getPreferences(interaction.guild.id, interaction.user.id);
       const game = mines.createGame({ guildId: interaction.guild.id, userId: interaction.user.id, bet: prefs.bet, mineCount: prefs.mine_count });
       await interaction.update(renderGame(interaction.guild, game));
-      const message = await interaction.fetchReply();
-      mines.attachMessage(game.id, interaction.channelId, message.id);
+      mines.attachMessage(game.id, interaction.channelId, interaction.message.id);
+      rememberPanelEditor(game.id, interaction.webhook, interaction.message.id, interaction.guild, interaction.user.id);
       return;
     } catch (error) {
       return interaction.reply({ embeds: [errorEmbed(error instanceof Error ? error.message : 'Não foi possível iniciar a partida.', undefined, interaction.guild)], flags: MessageFlags.Ephemeral });
@@ -132,13 +150,18 @@ async function routeMinesInteraction(interaction) {
     const game = reveal
       ? mines.revealCell({ ...params, position: Number(reveal[2]) })
       : mines.cashOut(params);
-    return interaction.update(renderGame(interaction.guild, game));
+    const result = await interaction.update(renderGame(interaction.guild, game));
+    rememberPanelEditor(game.id, interaction.webhook, interaction.message.id, interaction.guild, interaction.user.id);
+    return result;
   } catch (error) {
     if (error instanceof Error && /painel ficou desatualizado/.test(error.message)) {
       const match = reveal || cashout;
       if (match) {
         const game = mines.getGame(interaction.guild.id, interaction.user.id, Number(match[1]));
-        if (game) return interaction.update(renderGame(interaction.guild, game));
+        if (game) {
+          rememberPanelEditor(game.id, interaction.webhook, interaction.message.id, interaction.guild, interaction.user.id);
+          return interaction.update(renderGame(interaction.guild, game));
+        }
       }
     }
     return interaction.followUp({ embeds: [errorEmbed(error instanceof Error ? error.message : 'Não foi possível processar a jogada.', undefined, interaction.guild)], flags: MessageFlags.Ephemeral });
@@ -171,6 +194,11 @@ async function sweepMines(client, now = Date.now()) {
     if (!channel?.isTextBased() || !channel.messages) return;
     const message = await channel.messages.fetch(game.message_id).catch(() => null);
     if (message) await message.edit(renderGame(message.guild, game)).catch(() => null);
+    else {
+      const editor = panelEditors.get(game.id);
+      if (editor) await editor.webhook.editMessage(editor.messageId, renderGame(editor.guild, game)).catch(() => null);
+      panelEditors.delete(game.id);
+    }
   }));
   return expiredGames.length;
 }
@@ -219,4 +247,4 @@ async function routeMinesConfig(interaction) {
   }
 }
 
-module.exports = { PREFIX, settingsPanel, renderGame, minesConfigPanel, routeMinesInteraction, routeMinesConfig, startMinesSweeper, sweepMines };
+module.exports = { PREFIX, settingsPanel, renderGame, minesConfigPanel, routeMinesInteraction, routeMinesConfig, startMinesSweeper, sweepMines, rememberPanelEditor };

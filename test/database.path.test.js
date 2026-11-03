@@ -81,10 +81,10 @@ test('migra schema antigo sem colunas novas', () => {
     db.exec("CREATE TABLE guild_config (guild_id TEXT PRIMARY KEY); CREATE TABLE tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT, user_id TEXT NOT NULL, category_label TEXT, status TEXT DEFAULT 'open'); CREATE TABLE giveaways (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, prize TEXT NOT NULL, winners_count INTEGER DEFAULT 1, host_id TEXT, ends_at TEXT NOT NULL, ended INTEGER DEFAULT 0);");
     db.close();
     const { db: migrated } = require(process.env.DB_MODULE);
-    console.log(['ticket_config','claimed_at','cancelled'].map((c) => migrated.prepare('SELECT 1 FROM pragma_table_info(?) WHERE name = ?').get(c === 'ticket_config' ? 'guild_config' : c === 'cancelled' ? 'giveaways' : 'tickets', c)?.[1] ?? 0).join(','));
+    console.log([['guild_config','ticket_config'],['tickets','claimed_at'],['giveaways','cancelled'],['economy_mines_games','timeout_seconds'],['economy_mines_games','revision']].map(([table, column]) => migrated.prepare('SELECT 1 FROM pragma_table_info(?) WHERE name = ?').get(table, column)?.[1] ?? 0).join(','));
   `);
 
-  assert.equal(out.split('\n').at(-1), '1,1,1');
+  assert.equal(out.split('\n').at(-1), '1,1,1,1,1');
 });
 
 test('foreign keys e constraints recusam dados inválidos', () => {
