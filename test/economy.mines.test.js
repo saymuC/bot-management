@@ -185,6 +185,55 @@ test('reabrir e jogar novamente preserva o painel novo se a exclusão antiga fal
   assert.deepEqual(deleted, ['panel-old']);
 });
 
+test('falha pré-ack de update dá orientação para recuperar a partida', async () => {
+  cleanup();
+  const handler = require('../handlers/minesHandler');
+  const guild = { id: GUILD, name: 'Mines test' };
+  const replies = [];
+  const start = { guild, user: { id: USER }, customId: 'mines_start', channelId: 'chan',
+    isButton: () => true, deferred: false, replied: false, message: { id: 'settings-panel' }, webhook: {},
+    update: async () => { throw new Error('network failed before acknowledgement'); },
+    reply: async (payload) => { start.replied = true; replies.push(payload); },
+    followUp: async (payload) => replies.push(payload) };
+  changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: 1000, source: 'test' });
+  await handler.routeMinesInteraction(start);
+  assert.equal(replies.length, 1);
+  assert.match(replies[0].embeds[0].toJSON().description, /use \/mines para recuperá-la/i);
+  assert.equal(mines.getActiveGame(GUILD, USER).status, 'active');
+
+  const game = mines.getActiveGame(GUILD, USER);
+  const board = JSON.parse(db.prepare('SELECT board FROM economy_mines_games WHERE id = ?').get(game.id).board);
+  const safePosition = Array.from({ length: BOARD_SIZE }, (_, index) => index).find((position) => !board.includes(position));
+  const clicks = [];
+  const click = { guild, user: { id: USER }, customId: `mines_reveal_${game.id}_${safePosition}_0`,
+    isButton: () => true, isModalSubmit: () => false, deferred: false, replied: false, message: { id: 'game-panel' }, webhook: {},
+    update: async () => { throw new Error('timeout, ack unknown'); },
+    reply: async (payload) => { clicks.push(payload); }, followUp: async (payload) => clicks.push(payload) };
+  await handler.routeMinesInteraction(click);
+  assert.equal(clicks.length, 1);
+  assert.match(clicks[0].embeds[0].toJSON().description, /use \/mines para recuperá-la/i);
+  assert.deepEqual(mines.getActiveGame(GUILD, USER).revealed, [safePosition]);
+});
+
+test('sweeper tenta webhook efêmero e reembolso persiste quando webhook expirou', async () => {
+  cleanup();
+  const handler = require('../handlers/minesHandler');
+  changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: 1000, source: 'test' });
+  saveEconomyConfig(GUILD, { mines: { timeoutSeconds: 60 } });
+  const sweepNow = Date.now();
+  const game = mines.createGame({ guildId: GUILD, userId: USER, bet: 100, mineCount: 3, now: sweepNow,
+    randomBoard: () => [0, 1, 2] });
+  const edits = [];
+  const webhook = { editMessage: async (id, payload) => { edits.push({ id, payload }); throw new Error('expired interaction token'); },
+    deleteMessage: async () => { throw new Error('expired interaction token'); } };
+  handler.rememberPanelEditor(game.id, webhook, 'ephemeral-message', { id: GUILD }, USER);
+  const client = { channels: { fetch: async () => { throw new Error('ephemeral message not in channel history'); } } };
+  assert.equal(await handler.sweepMines(client, sweepNow + 60_001), 1);
+  assert.equal(edits[0].id, 'ephemeral-message');
+  assert.equal(mines.getBalance(GUILD, USER), 1000);
+  assert.equal(db.prepare('SELECT status FROM economy_mines_games WHERE id = ?').get(game.id).status, 'expired');
+});
+
 test('jogada de outro usuário recebe recusa efêmera sem alterar o painel ou saldo', async () => {
   cleanup();
   changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: 1000, source: 'test' });

@@ -102,6 +102,12 @@ async function showInteractionError(interaction, message) {
   return interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
 }
 
+function reportUpdateFailure(interaction) {
+  if (interaction.deferred || interaction.replied) return Promise.resolve();
+  return interaction.reply({ embeds: [errorEmbed('Não foi possível atualizar o painel. A partida foi salva; use /mines para recuperá-la.', undefined, interaction.guild)],
+    flags: MessageFlags.Ephemeral }).catch(() => null);
+}
+
 function settingsModal(guild, userId) {
   const current = mines.getPreferences(guild.id, userId);
   const modal = new ModalBuilder().setCustomId(`${PREFIX}submit_settings`).setTitle('Configurar Mines');
@@ -146,7 +152,7 @@ async function routeMinesInteraction(interaction) {
       }
       return;
     } catch (error) {
-      if (updateAttempted) return;
+      if (updateAttempted) return reportUpdateFailure(interaction);
       return showInteractionError(interaction, error instanceof Error ? error.message : 'Não foi possível iniciar a partida.');
     }
   }
@@ -166,7 +172,7 @@ async function routeMinesInteraction(interaction) {
     rememberPanelEditor(game.id, interaction.webhook, interaction.message.id, interaction.guild, interaction.user.id);
     return result;
   } catch (error) {
-    if (updateAttempted) return;
+    if (updateAttempted) return reportUpdateFailure(interaction);
     if (error instanceof Error && /painel ficou desatualizado/.test(error.message)) {
       const match = reveal || cashout;
       if (match) {
@@ -177,7 +183,8 @@ async function routeMinesInteraction(interaction) {
       const game = mines.getGame(interaction.guild.id, interaction.user.id, gameId);
       if (game && currentRevision !== null && isRecentPanel) {
           rememberPanelEditor(game.id, interaction.webhook, interaction.message.id, interaction.guild, interaction.user.id);
-          return interaction.update(renderGame(interaction.guild, game));
+          updateAttempted = true;
+          return interaction.update(renderGame(interaction.guild, game)).catch(() => reportUpdateFailure(interaction));
         }
       }
     }
@@ -206,16 +213,19 @@ async function sweepMines(client, now = Date.now()) {
   const expiredGames = mines.expireDueGames(now);
   if (!client) return expiredGames.length;
   await Promise.all(expiredGames.map(async (game) => {
-    if (!game.channel_id || !game.message_id) return;
-    const channel = await client.channels.fetch(game.channel_id).catch(() => null);
-    if (!channel?.isTextBased() || !channel.messages) return;
-    const message = await channel.messages.fetch(game.message_id).catch(() => null);
-    if (message) await message.edit(renderGame(message.guild, game)).catch(() => null);
-    else {
-      const editor = panelEditors.get(game.id);
-      if (editor) await editor.webhook.editMessage(editor.messageId, renderGame(editor.guild, game)).catch(() => null);
-      panelEditors.delete(game.id);
+    const editor = panelEditors.get(game.id);
+    let updated = false;
+    if (game.channel_id && game.message_id) {
+      const channel = await client.channels.fetch(game.channel_id).catch(() => null);
+      if (channel?.isTextBased() && channel.messages) {
+        const message = await channel.messages.fetch(game.message_id).catch(() => null);
+        if (message) updated = Boolean(await message.edit(renderGame(message.guild, game)).then(() => true).catch(() => false));
+      }
     }
+    if (!updated && editor) {
+      await editor.webhook.editMessage(editor.messageId, renderGame(editor.guild, game)).catch(() => null);
+    }
+    panelEditors.delete(game.id);
   }));
   return expiredGames.length;
 }
