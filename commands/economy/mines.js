@@ -2,7 +2,7 @@
 const { SlashCommandBuilder } = require('discord.js');
 const { respond } = require('../../utils/interactions');
 const { getEconomyConfig } = require('../../config/economy');
-const { getActiveGame, getLatestGame, expireGame, attachActiveMessage } = require('../../utils/economy/mines/service');
+const { getActiveGame, expireGame, attachActiveMessage } = require('../../utils/economy/mines/service');
 const { settingsPanel, renderGame, rememberPanelEditor } = require('../../handlers/minesHandler');
 const { errorEmbed } = require('../../utils/embeds');
 
@@ -17,15 +17,16 @@ module.exports = {
       return respond(interaction, { embeds: [errorEmbed('Mines está desativado neste servidor.', undefined, interaction.guild)] });
     }
     let game = getActiveGame(interaction.guild.id, interaction.user.id);
-    if (game && game.expires_at <= Date.now()) game = expireGame({ guildId: interaction.guild.id, userId: interaction.user.id, gameId: game.id });
+    if (game && game.expires_at <= Date.now()) {
+      expireGame({ guildId: interaction.guild.id, userId: interaction.user.id, gameId: game.id });
+      game = null;
+    }
     if (game) {
       const message = await respond(interaction, renderGame(interaction.guild, game));
       if (message?.id) attachActiveMessage(interaction.guild.id, interaction.user.id, interaction.channelId, message.id);
       if (message?.id) rememberPanelEditor(game.id, interaction.webhook, message.id, interaction.guild, interaction.user.id);
       return message;
     }
-    const latest = getLatestGame(interaction.guild.id, interaction.user.id);
-    if (latest && latest.status !== 'active') return respond(interaction, renderGame(interaction.guild, latest));
     return respond(interaction, settingsPanel(interaction.guild, interaction.user.id));
   },
 };

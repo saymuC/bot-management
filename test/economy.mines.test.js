@@ -46,8 +46,9 @@ test('derrota mostra o multiplicador correspondente apenas às casas seguras', (
   mines.revealCell({ guildId: GUILD, userId: USER, gameId: game.id, position: 3, revision: 0, now: now + 1 });
   const lost = mines.revealCell({ guildId: GUILD, userId: USER, gameId: game.id, position: 0, revision: 1, now: now + 2 });
   const fields = renderGame({ id: GUILD, name: 'Mines test' }, lost).embeds[0].toJSON().fields;
-  assert.equal(fields.find((field) => field.name === 'Multiplicador').value, `${multiplier(3, 1).toFixed(2)}x`);
-  assert.equal(fields.find((field) => field.name === 'Ganho potencial').value, `${payout(100, 3, 1)} moedas`);
+  assert.equal(fields.some((field) => field.name === 'Multiplicador'), false);
+  assert.equal(fields.find((field) => field.name === 'Aposta perdida').value, '-100 moedas');
+  assert.equal(fields.some((field) => field.name === 'Ganho disponível'), false);
 });
 
 test('aposta e saque são atômicos, idempotentes e registrados no extrato', () => {
@@ -107,7 +108,7 @@ test('a partida congela timeout e configurações subsequentes não alteram sua 
   cleanup();
   changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: 1000, source: 'test' });
   saveEconomyConfig(GUILD, { mines: { timeoutSeconds: 60 } });
-  const game = mines.createGame({ guildId: GUILD, userId: USER, bet: 100, mineCount: 3, now,
+  const game = mines.createGame({ guildId: GUILD, userId: USER, bet: 100, mineCount: 3, now: Date.now(),
     randomBoard: () => [0, 1, 2] });
   assert.equal(game.timeout_seconds, 60);
   saveEconomyConfig(GUILD, { mines: { timeoutSeconds: 600 } });
@@ -155,22 +156,26 @@ test('falhas depois de atualizar o painel não tentam uma segunda resposta', asy
   const guild = { id: GUILD, name: 'Mines test' };
   const start = { guild, user: { id: USER }, customId: 'mines_start', channelId: 'chan',
     isButton: () => true, deferred: false, replied: false, message: { id: 'settings-panel' }, webhook: {},
-    update: async () => { start.replied = true; throw new Error('falha em fetch posterior'); },
-    reply: async () => assert.fail('Não pode responder novamente após update.'),
-    followUp: async () => assert.fail('Não pode fazer follow-up após update.') };
+    update: async () => { throw new Error('falha de rede com ack incerto'); },
+    reply: async (payload) => { start.replied = true; start.recovery = payload; },
+    followUp: async (payload) => { start.recovery = payload; } };
   changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: 1000, source: 'test' });
   await handler.routeMinesInteraction(start);
   assert.equal(mines.getActiveGame(GUILD, USER).status, 'active');
+  assert.match(start.recovery.embeds[0].toJSON().description, /use \/mines para recuperá-la/i);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM economy_mines_games WHERE guild_id = ? AND user_id = ?').get(GUILD, USER).n, 1);
 
   const active = mines.getActiveGame(GUILD, USER);
-  const reveal = { guild, user: { id: USER }, customId: `mines_reveal_${active.id}_4_0`,
+  const board = JSON.parse(db.prepare('SELECT board FROM economy_mines_games WHERE id = ?').get(active.id).board);
+  const safePosition = Array.from({ length: BOARD_SIZE }, (_, index) => index).find((position) => !board.includes(position));
+  const reveal = { guild, user: { id: USER }, customId: `mines_reveal_${active.id}_${safePosition}_0`,
     isButton: () => true, isModalSubmit: () => false, deferred: false, replied: false, message: { id: 'game-panel' }, webhook: {},
-    update: async () => { reveal.replied = true; throw new Error('fake REST failure'); },
-    reply: async () => assert.fail('Não pode responder novamente após update.'),
-    followUp: async () => assert.fail('Não pode fazer follow-up após update.') };
+    update: async () => { throw new Error('fake REST failure'); },
+    reply: async (payload) => { reveal.recovery = payload; },
+    followUp: async (payload) => { reveal.recovery = payload; } };
   await handler.routeMinesInteraction(reveal);
-  assert.deepEqual(mines.getActiveGame(GUILD, USER).revealed, [4]);
+  assert.deepEqual(mines.getActiveGame(GUILD, USER).revealed, [safePosition]);
+  assert.match(reveal.recovery.embeds[0].toJSON().description, /use \/mines para recuperá-la/i);
 });
 
 test('reabrir e jogar novamente preserva o painel novo se a exclusão antiga falhar', async () => {

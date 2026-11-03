@@ -119,7 +119,6 @@ function createGame({ guildId, userId, bet, mineCount, now = Date.now(), randomB
 function revealCell({ guildId, userId, gameId, position, revision, now = Date.now() }) {
   if (!Number.isSafeInteger(gameId) || !Number.isSafeInteger(position) || position < 0 || position >= BOARD_SIZE ||
       !Number.isSafeInteger(revision) || revision < 0) throw new Error('Jogada inválida.');
-  if (!Number.isSafeInteger(revision) || revision < 0) throw new Error('Revisão de painel inválida.');
   return db.transaction(() => {
     const game = gameById.get(gameId, guildId);
     if (!game || game.user_id !== userId) throw new Error('Partida não encontrada ou não pertence a você.');
@@ -148,7 +147,6 @@ function revealCell({ guildId, userId, gameId, position, revision, now = Date.no
 }
 
 function cashOut({ guildId, userId, gameId, revision, now = Date.now() }) {
-  if (!Number.isSafeInteger(gameId) || !Number.isSafeInteger(revision) || revision < 0) throw new Error('Revisão de painel inválida.');
   if (!Number.isSafeInteger(gameId) || !Number.isSafeInteger(revision) || revision < 0) throw new Error('Revisão de painel inválida.');
   return db.transaction(() => {
     const game = gameById.get(gameId, guildId);

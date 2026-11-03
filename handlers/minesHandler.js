@@ -6,12 +6,14 @@ const { currency } = require('../utils/economy/currency');
 const { formatMoney } = require('../utils/economy/formatter');
 const { getEconomyConfig, saveEconomyConfig } = require('../config/economy');
 const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
+const { logError } = require('../utils/observability');
 const mines = require('../utils/economy/mines/service');
 const { multiplier, payout, safePickCount, BOARD_SIZE } = require('../utils/economy/mines/engine');
 
 const PREFIX = 'mines_';
 const CONFIG_PREFIX = 'eco_cfg_mines_';
 const panelEditors = new Map();
+const isExpectedMessageAbsence = (error) => [10003, 10008, 10015].includes(Number(error?.code));
 
 function rememberPanelEditor(gameId, webhook, messageId, guild, userId) {
   if (!webhook?.editMessage || !messageId) return;
@@ -63,13 +65,19 @@ function renderGame(guild, game) {
   if (won) description += `\n\n${emoji(guild, 'eco_mines_cashout')} Retirada concluída: **${formatMoney(game.payout)} ${currency(guild).name}**.`;
   else if (lost) description += `\n\n${emoji(guild, 'eco_mines')} Mina encontrada. A aposta foi perdida.`;
   else if (game.status === 'expired' || game.status === 'refunded') description += '\n\nPartida encerrada; a aposta foi devolvida.';
-  const fields = [
+  const fields = game.status === 'active' ? [
     { name: 'Aposta', value: `${formatMoney(game.bet)} ${currency(guild).name}`, inline: true },
     { name: 'Minas', value: String(game.mine_count), inline: true },
     { name: 'Multiplicador', value: `${activeMultiplier.toFixed(2)}x`, inline: true },
-    { name: 'Ganho potencial', value: `${formatMoney(potential)} ${currency(guild).name}`, inline: true },
+    { name: 'Ganho disponível', value: `${formatMoney(potential)} ${currency(guild).name}`, inline: true },
+  ] : won ? [
+    { name: 'Pagamento recebido', value: `${formatMoney(game.payout)} ${currency(guild).name}`, inline: true },
+    { name: 'Lucro líquido', value: `${formatMoney(game.payout - game.bet)} ${currency(guild).name}`, inline: true },
+  ] : game.status === 'lost' ? [
+    { name: 'Aposta perdida', value: `-${formatMoney(game.bet)} ${currency(guild).name}`, inline: true },
+  ] : [
+    { name: 'Valor reembolsado', value: `+${formatMoney(game.bet)} ${currency(guild).name}`, inline: true },
   ];
-  if (won) fields.push({ name: 'Lucro líquido', value: `${formatMoney(game.payout - game.bet)} ${currency(guild).name}`, inline: true });
 
   const rows = [];
   for (let row = 0; row < 4; row += 1) {
@@ -79,7 +87,7 @@ function renderGame(guild, game) {
       const isRevealed = revealed.has(position);
       const isMine = finished && board.includes(position);
       const style = isMine ? ButtonStyle.Danger : isRevealed ? ButtonStyle.Success : ButtonStyle.Secondary;
-      const button = new ButtonBuilder().setCustomId(`${PREFIX}reveal_${game.id}_${position}_${game.revision ?? 0}`).setLabel(String(position + 1))
+      const button = new ButtonBuilder().setCustomId(`${PREFIX}reveal_${game.id}_${position}_${game.revision ?? 0}`).setLabel('Casa')
         .setStyle(style).setDisabled(finished || isRevealed);
       if (isMine) button.setEmoji(emoji(guild, 'eco_mines'));
       else if (isRevealed) button.setEmoji(emoji(guild, 'eco_mines_safe'));
@@ -102,10 +110,13 @@ async function showInteractionError(interaction, message) {
   return interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
 }
 
-function reportUpdateFailure(interaction) {
-  if (interaction.deferred || interaction.replied) return Promise.resolve();
-  return interaction.reply({ embeds: [errorEmbed('Não foi possível atualizar o painel. A partida foi salva; use /mines para recuperá-la.', undefined, interaction.guild)],
-    flags: MessageFlags.Ephemeral }).catch(() => null);
+function reportUpdateFailure(interaction, error) {
+  logError('mines.interaction_update', error, { guildId: interaction.guildId, userId: interaction.user?.id, customId: interaction.customId });
+  const payload = { embeds: [errorEmbed('Não foi possível atualizar o painel. A partida foi salva; use /mines para recuperá-la.', undefined, interaction.guild)], flags: MessageFlags.Ephemeral };
+  return Promise.resolve().then(() => interaction.deferred || interaction.replied
+    ? interaction.followUp(payload) : interaction.reply(payload)).catch((replyError) => {
+    logError('mines.interaction_recovery_reply', replyError, { guildId: interaction.guildId, userId: interaction.user?.id });
+  });
 }
 
 function settingsModal(guild, userId) {
@@ -136,30 +147,31 @@ async function routeMinesInteraction(interaction) {
   }
   if (['start', 'again'].includes(action) && interaction.isButton()) {
     const alreadyAcknowledged = interaction.deferred || interaction.replied;
-    let updateAttempted = false;
+    let responseAttempted = false;
     try {
       const prefs = mines.getPreferences(interaction.guild.id, interaction.user.id);
       const game = mines.createGame({ guildId: interaction.guild.id, userId: interaction.user.id, bet: prefs.bet, mineCount: prefs.mine_count });
       if (alreadyAcknowledged) {
+        responseAttempted = true;
         const message = await interaction.followUp({ ...renderGame(interaction.guild, game), flags: MessageFlags.Ephemeral });
         mines.attachMessage(game.id, interaction.channelId, message.id);
         rememberPanelEditor(game.id, interaction.webhook, message.id, interaction.guild, interaction.user.id);
       } else {
-        updateAttempted = true;
+        responseAttempted = true;
         await interaction.update(renderGame(interaction.guild, game));
         mines.attachMessage(game.id, interaction.channelId, interaction.message.id);
         rememberPanelEditor(game.id, interaction.webhook, interaction.message.id, interaction.guild, interaction.user.id);
       }
       return;
     } catch (error) {
-      if (updateAttempted) return reportUpdateFailure(interaction);
+      if (responseAttempted) return reportUpdateFailure(interaction, error);
       return showInteractionError(interaction, error instanceof Error ? error.message : 'Não foi possível iniciar a partida.');
     }
   }
   const reveal = /^reveal_(\d+)_(\d+)_(\d+)$/.exec(action);
   const cashout = /^cashout_(\d+)_(\d+)$/.exec(action);
   if (!reveal && !cashout) return showInteractionError(interaction, 'Ação do Mines inválida.');
-  let updateAttempted = false;
+  let responseAttempted = false;
   try {
     const match = reveal || cashout;
     if (!match) return;
@@ -167,24 +179,25 @@ async function routeMinesInteraction(interaction) {
     const game = reveal
       ? mines.revealCell({ ...params, position: Number(reveal[2]) })
       : mines.cashOut(params);
-    updateAttempted = true;
+    responseAttempted = true;
     const result = await interaction.update(renderGame(interaction.guild, game));
     rememberPanelEditor(game.id, interaction.webhook, interaction.message.id, interaction.guild, interaction.user.id);
     return result;
   } catch (error) {
-    if (updateAttempted) return reportUpdateFailure(interaction);
+    if (responseAttempted) return reportUpdateFailure(interaction, error);
     if (error instanceof Error && /painel ficou desatualizado/.test(error.message)) {
       const match = reveal || cashout;
       if (match) {
-      const gameId = Number(match[1]);
-      const currentRevision = mines.getGameRevision(interaction.guild.id, interaction.user.id, gameId);
-      const messageId = interaction.message.id;
-      const isRecentPanel = !panelEditors.has(gameId) || panelEditors.get(gameId).messageId === messageId;
-      const game = mines.getGame(interaction.guild.id, interaction.user.id, gameId);
-      if (game && currentRevision !== null && isRecentPanel) {
+        const gameId = Number(match[1]);
+        const currentRevision = mines.getGameRevision(interaction.guild.id, interaction.user.id, gameId);
+        const messageId = interaction.message.id;
+        const isRecentPanel = !panelEditors.has(gameId) || panelEditors.get(gameId).messageId === messageId;
+        const game = mines.getGame(interaction.guild.id, interaction.user.id, gameId);
+        if (game && currentRevision !== null && isRecentPanel) {
           rememberPanelEditor(game.id, interaction.webhook, interaction.message.id, interaction.guild, interaction.user.id);
-          updateAttempted = true;
-          return interaction.update(renderGame(interaction.guild, game)).catch(() => reportUpdateFailure(interaction));
+          responseAttempted = true;
+          return interaction.update(renderGame(interaction.guild, game))
+            .catch((updateError) => reportUpdateFailure(interaction, updateError));
         }
       }
     }
@@ -218,12 +231,20 @@ async function sweepMines(client, now = Date.now()) {
     if (game.channel_id && game.message_id) {
       const channel = await client.channels.fetch(game.channel_id).catch(() => null);
       if (channel?.isTextBased() && channel.messages) {
-        const message = await channel.messages.fetch(game.message_id).catch(() => null);
-        if (message) updated = Boolean(await message.edit(renderGame(message.guild, game)).then(() => true).catch(() => false));
+        const message = await channel.messages.fetch(game.message_id).catch((error) => {
+          if (!isExpectedMessageAbsence(error)) logError('mines.expiration_fetch', error, { guildId: game.guild_id, gameId: game.id, channelId: game.channel_id });
+          return null;
+        });
+        if (message) updated = Boolean(await message.edit(renderGame(message.guild, game)).then(() => true).catch((error) => {
+          if (!isExpectedMessageAbsence(error)) logError('mines.expiration_edit', error, { guildId: game.guild_id, gameId: game.id, messageId: game.message_id });
+          return false;
+        }));
       }
     }
     if (!updated && editor) {
-      await editor.webhook.editMessage(editor.messageId, renderGame(editor.guild, game)).catch(() => null);
+      await editor.webhook.editMessage(editor.messageId, renderGame(editor.guild, game)).catch((error) => {
+        if (!isExpectedMessageAbsence(error)) logError('mines.expiration_webhook_edit', error, { guildId: game.guild_id, gameId: game.id, messageId: editor.messageId });
+      });
     }
     panelEditors.delete(game.id);
   }));
@@ -232,7 +253,7 @@ async function sweepMines(client, now = Date.now()) {
 
 function startMinesSweeper(client) {
   const sweep = () => {
-    sweepMines(client).catch((error) => console.error('[mines] Erro ao reembolsar partidas expiradas:', error));
+    sweepMines(client).catch((error) => logError('mines.expiration_sweep', error));
   };
   sweep();
   setInterval(sweep, 30_000).unref();
