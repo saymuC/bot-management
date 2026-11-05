@@ -4,7 +4,7 @@ const DAILY = Object.freeze({ min: 300, max: 500, cooldownMs: 24 * 60 * 60 * 100
 const WORK = Object.freeze({ min: 150, max: 300, cooldownMs: 30 * 60 * 1000 });
 const { getGuildConfig, setGuildConfig } = require('../database/db');
 const { db } = require('../database/db');
-const { BOARD_SIZE, payout } = require('../utils/economy/mines/engine');
+const { BOARD_SIZE, multiplier } = require('../utils/economy/mines/engine');
 const MINES_DEFAULT = Object.freeze({ enabled: true, minBet: 50, maxBet: 1_000, maxMines: 19, houseEdgeBps: 300, timeoutSeconds: 300 });
 /** @typedef {{ enabled: boolean, minBet: number, maxBet: number, maxMines: number, houseEdgeBps: number, timeoutSeconds: number }} MinesConfig */
 /** @typedef {{ enabled: boolean, dailyMin: number, dailyMax: number, workMin: number, workMax: number, workCooldownMinutes: number, currencyName: string, currencyEmoji: string|null, mines: MinesConfig }} EconomyConfig */
@@ -80,11 +80,13 @@ function saveEconomyConfig(guildId, changes) {
     next.mines = mines;
   }
   if (next.mines.maxMines > BOARD_SIZE - 1) throw new Error('Quantidade máxima de minas inválida.');
-  const payoutCap = Math.min(MAX_BALANCE, ...Array.from({ length: BOARD_SIZE - 3 }, (_, i) => {
-    const size = i + 4;
-    const mineCount = Math.min(next.mines.maxMines, size - 1);
-    return Math.floor(MAX_BALANCE / payout(1, mineCount, size - mineCount, next.mines.houseEdgeBps, size));
-  }));
+  let payoutCap = MAX_BALANCE;
+  for (let size = 4; size <= BOARD_SIZE; size += 1) {
+    for (let mineCount = 1; mineCount <= Math.min(next.mines.maxMines, size - 1); mineCount += 1) {
+      payoutCap = Math.min(payoutCap,
+        Math.floor(MAX_BALANCE / multiplier(mineCount, size - mineCount, next.mines.houseEdgeBps, size)));
+    }
+  }
   if (next.mines.maxBet > payoutCap) throw new Error(`A aposta máxima precisa ser de até ${payoutCap} para garantir o pagamento integral.`);
   const save = () => {
     setGuildConfig(guildId, 'economy_config', JSON.stringify(next));

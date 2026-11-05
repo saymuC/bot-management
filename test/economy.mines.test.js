@@ -109,11 +109,31 @@ test('processos concorrentes não iniciam duas partidas e reserva protege o teto
   assert.throws(() => saveEconomyConfig(GUILD, { mines: { maxMines: 0 } }), /Configuração de Mines/);
 });
 
+test('limite de aposta considera combinações intermediárias de minas em tabuleiro de 20 casas', () => {
+  cleanup();
+  for (const [mineCount, payoutPerCoin, expectedCap] of [
+    [8, 122_190, 8_183],
+    [9, 162_921, 6_137],
+    [10, 179_213, 5_579],
+  ]) {
+    assert.equal(payout(1, mineCount, 20 - mineCount, 300, 20), payoutPerCoin);
+    assert.ok(payout(expectedCap, mineCount, 20 - mineCount, 300, 20) <= MAX_BALANCE);
+    assert.ok(payout(expectedCap + 1, mineCount, 20 - mineCount, 300, 20) > MAX_BALANCE);
+    const saved = saveEconomyConfig(GUILD, { mines: { maxBet: expectedCap, maxMines: mineCount } });
+    assert.equal(saved.mines.maxBet, expectedCap);
+    assert.throws(() => saveEconomyConfig(GUILD, { mines: { maxBet: expectedCap + 1 } }), /pagamento integral/);
+  }
+  const saved = saveEconomyConfig(GUILD, { mines: { maxBet: 5_579, maxMines: 19 } });
+  assert.equal(saved.mines.maxBet, 5_579);
+  assert.throws(() => saveEconomyConfig(GUILD, { mines: { maxBet: 5_580 } }), /pagamento integral/);
+  assert.equal(getEconomyConfig(GUILD).mines.maxBet, 5_579);
+});
+
 test('a partida congela timeout e configurações subsequentes não alteram sua validade', () => {
   cleanup();
   changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: 1000, source: 'test' });
   saveEconomyConfig(GUILD, { mines: { timeoutSeconds: 60 } });
-  const game = mines.createGame({ guildId: GUILD, userId: USER, bet: 100, mineCount: 3, now: Date.now(),
+  const game = mines.createGame({ guildId: GUILD, userId: USER, bet: 100, mineCount: 3, now,
     randomBoard: () => [0, 1, 2] });
   assert.equal(game.timeout_seconds, 60);
   saveEconomyConfig(GUILD, { mines: { timeoutSeconds: 600 } });
