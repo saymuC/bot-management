@@ -1,7 +1,7 @@
 // @ts-check
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags } = require('discord.js');
 const { baseEmbed, errorEmbed } = require('../utils/embeds');
-const { emoji } = require('../utils/emojis');
+const { emoji, DEFAULT_EMOJIS } = require('../utils/emojis');
 const { currency } = require('../utils/economy/currency');
 const { formatMoney } = require('../utils/economy/formatter');
 const { getEconomyConfig, saveEconomyConfig } = require('../config/economy');
@@ -102,7 +102,11 @@ function renderGame(guild, game) {
       else if (isRevealed) {
         button.setLabel(`+${formatMoney(safeValue)}`).setEmoji(emoji(guild, 'eco_mines_safe'));
       }
-      else button.setEmoji(emoji(guild, 'eco_mines_hidden'));
+      else {
+        const hidden = emoji(guild, 'eco_mines_hidden');
+        if (hidden !== DEFAULT_EMOJIS.eco_mines_hidden) button.setEmoji(hidden);
+        else button.setLabel('ㅤ');
+      }
       buttons.push(button);
     }
     rows.push(new ActionRowBuilder().addComponents(buttons).toJSON());
