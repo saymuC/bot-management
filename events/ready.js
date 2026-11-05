@@ -1,6 +1,7 @@
 const { Events } = require('discord.js');
 const { startGiveawaySweeper } = require('../handlers/giveawayHandler');
 const { startPresenceKeeper } = require('../utils/presenceKeeper');
+const { startMinesSweeper } = require('../handlers/minesHandler');
 
 module.exports = {
   name: Events.ClientReady,
@@ -13,5 +14,6 @@ module.exports = {
     startPresenceKeeper(client);
 
     startGiveawaySweeper(client);
+    startMinesSweeper(client);
   },
 };

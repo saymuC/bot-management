@@ -30,8 +30,8 @@ function buildEconomyPanel(guild) {
         .setEmoji(emoji(guild, config.enabled ? 'warning' : 'success'))
         .setStyle(config.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
       new ButtonBuilder().setCustomId(`${PREFIX}rewards`).setLabel('Recompensas').setEmoji(emoji(guild, 'eco_daily')).setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`${PREFIX}currency`).setLabel('Moeda').setEmoji(coin).setStyle(ButtonStyle.Secondary)
-    ).toJSON(), new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`${PREFIX}currency`).setLabel('Moeda').setEmoji(coin).setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`${PREFIX}mines`).setLabel('Minigames').setEmoji(emoji(guild, 'eco_mines')).setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`${PREFIX}close`).setLabel('Fechar').setEmoji(emoji(guild, 'error')).setStyle(ButtonStyle.Secondary)
     ).toJSON()],
   };
@@ -49,6 +49,12 @@ async function routeEconomyConfig(interaction) {
   }
   if (interaction.isButton() && action === 'close') {
     return interaction.update({ embeds: [baseEmbed({ title: `${emoji(interaction.guild, 'eco_coin')} Economia`, description: 'Painel fechado. Todas as alterações já estão salvas.' })], components: [] });
+  }
+  if (interaction.isButton() && action === 'mines') {
+    return interaction.update(require('./minesHandler').minesConfigPanel(interaction.guild));
+  }
+  if (action.startsWith('mines_')) {
+    return require('./minesHandler').routeMinesConfig(interaction);
   }
   if (interaction.isButton() && ['rewards', 'currency'].includes(action)) {
     const config = getEconomyConfig(interaction.guild.id);

@@ -204,6 +204,52 @@ CREATE TABLE IF NOT EXISTS economy_inventory (
   PRIMARY KEY (guild_id, user_id, item_id)
 );
 
+CREATE TABLE IF NOT EXISTS economy_mines_games (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  bet INTEGER NOT NULL CHECK (bet > 0),
+  board_size INTEGER NOT NULL DEFAULT 20 CHECK (board_size BETWEEN 4 AND 20),
+  mine_count INTEGER NOT NULL CHECK (mine_count BETWEEN 1 AND board_size - 1),
+  house_edge_bps INTEGER NOT NULL CHECK (house_edge_bps BETWEEN 0 AND 9999),
+  timeout_seconds INTEGER NOT NULL DEFAULT 300 CHECK (timeout_seconds BETWEEN 1 AND 86400),
+  board TEXT NOT NULL,
+  revealed TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'won', 'lost', 'expired', 'refunded')),
+  payout INTEGER NOT NULL DEFAULT 0,
+  reserved_payout INTEGER NOT NULL DEFAULT 0,
+  revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  channel_id TEXT,
+  message_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  finished_at INTEGER
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mines_active_user
+  ON economy_mines_games (guild_id, user_id) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_mines_expiration
+  ON economy_mines_games (expires_at) WHERE status = 'active';
+CREATE TABLE IF NOT EXISTS economy_mines_moves (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  game_id INTEGER NOT NULL REFERENCES economy_mines_games(id),
+  position INTEGER NOT NULL CHECK (position >= 0),
+  move_number INTEGER NOT NULL CHECK (move_number > 0),
+  safe INTEGER NOT NULL CHECK (safe IN (0, 1)),
+  created_at INTEGER NOT NULL,
+  UNIQUE (game_id, position),
+  UNIQUE (game_id, move_number)
+);
+CREATE TABLE IF NOT EXISTS economy_mines_preferences (
+  guild_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  bet INTEGER NOT NULL DEFAULT 100 CHECK (bet > 0),
+  board_size INTEGER NOT NULL DEFAULT 20 CHECK (board_size BETWEEN 4 AND 20),
+  mine_count INTEGER NOT NULL DEFAULT 3 CHECK (mine_count BETWEEN 1 AND board_size - 1),
+  PRIMARY KEY (guild_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS reaction_roles (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   guild_id TEXT NOT NULL,
@@ -246,6 +292,11 @@ const CONFIG_FIELDS = [
 ];
 
 for (const column of CONFIG_FIELDS) ensureColumn('guild_config', column, 'TEXT');
+ensureColumn('economy_transactions', 'operation_key', 'TEXT');
+ensureColumn('economy_mines_games', 'timeout_seconds', 'INTEGER NOT NULL DEFAULT 300');
+ensureColumn('economy_mines_games', 'revision', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('economy_mines_games', 'board_size', 'INTEGER NOT NULL DEFAULT 20');
+ensureColumn('economy_mines_preferences', 'board_size', 'INTEGER NOT NULL DEFAULT 20');
 ensureColumn('tickets', 'claimed_by', 'TEXT');
 ensureColumn('tickets', 'created_at', 'TEXT DEFAULT CURRENT_TIMESTAMP');
 ensureColumn('tickets', 'claimed_at', 'TEXT');
@@ -257,6 +308,7 @@ ensureColumn('giveaways', 'cancelled', 'INTEGER DEFAULT 0');
 ensureColumn('giveaways', 'cancelled_by', 'TEXT');
 
 db.exec('CREATE INDEX IF NOT EXISTS idx_tickets_claimed ON tickets (guild_id, claimed_by)');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_economy_transactions_operation ON economy_transactions (operation_key) WHERE operation_key IS NOT NULL');
 
 // ---- guild_config ----
 const upsertConfigField = (field) =>
