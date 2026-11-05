@@ -156,10 +156,10 @@ test('preferências persistem tamanho do tabuleiro e limitam bombas por casas', 
   assert.equal(payload.components.length, 2);
   assert.equal(payload.components[0].components.length, 4);
   assert.equal(payload.components[1].components.length, 1);
-  assert.equal(payload.components[0].components[0].emoji.name, '⬜');
+  assert.equal(payload.components[0].components[0].emoji.name, 'ㅤ');
   const revealed = mines.revealCell({ guildId: GUILD, userId: USER, gameId: game.id, position: 3, revision: 0, now: now + 1 });
   const revealedPayload = renderGame({ id: GUILD, name: 'Mines test' }, revealed);
-  assert.equal(revealedPayload.components[0].components[3].label, '+14');
+  assert.equal(revealedPayload.components[0].components[3].label, '+288');
   assert.equal(revealedPayload.components[0].components[3].emoji.name, '💎');
   const finished = mines.revealCell({ guildId: GUILD, userId: USER, gameId: game.id, position: 0, revision: 1, now: now + 2 });
   const finalPayload = renderGame({ id: GUILD, name: 'Mines test' }, finished);
