@@ -209,7 +209,8 @@ CREATE TABLE IF NOT EXISTS economy_mines_games (
   guild_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   bet INTEGER NOT NULL CHECK (bet > 0),
-  mine_count INTEGER NOT NULL CHECK (mine_count BETWEEN 1 AND 19),
+  board_size INTEGER NOT NULL DEFAULT 20 CHECK (board_size BETWEEN 4 AND 20),
+  mine_count INTEGER NOT NULL CHECK (mine_count BETWEEN 1 AND board_size - 1),
   house_edge_bps INTEGER NOT NULL CHECK (house_edge_bps BETWEEN 0 AND 9999),
   timeout_seconds INTEGER NOT NULL DEFAULT 300 CHECK (timeout_seconds BETWEEN 1 AND 86400),
   board TEXT NOT NULL,
@@ -233,7 +234,7 @@ CREATE INDEX IF NOT EXISTS idx_mines_expiration
 CREATE TABLE IF NOT EXISTS economy_mines_moves (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   game_id INTEGER NOT NULL REFERENCES economy_mines_games(id),
-  position INTEGER NOT NULL CHECK (position BETWEEN 0 AND 19),
+  position INTEGER NOT NULL CHECK (position >= 0),
   move_number INTEGER NOT NULL CHECK (move_number > 0),
   safe INTEGER NOT NULL CHECK (safe IN (0, 1)),
   created_at INTEGER NOT NULL,
@@ -244,7 +245,8 @@ CREATE TABLE IF NOT EXISTS economy_mines_preferences (
   guild_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   bet INTEGER NOT NULL DEFAULT 100 CHECK (bet > 0),
-  mine_count INTEGER NOT NULL DEFAULT 3 CHECK (mine_count BETWEEN 1 AND 19),
+  board_size INTEGER NOT NULL DEFAULT 20 CHECK (board_size BETWEEN 4 AND 20),
+  mine_count INTEGER NOT NULL DEFAULT 3 CHECK (mine_count BETWEEN 1 AND board_size - 1),
   PRIMARY KEY (guild_id, user_id)
 );
 
@@ -293,6 +295,8 @@ for (const column of CONFIG_FIELDS) ensureColumn('guild_config', column, 'TEXT')
 ensureColumn('economy_transactions', 'operation_key', 'TEXT');
 ensureColumn('economy_mines_games', 'timeout_seconds', 'INTEGER NOT NULL DEFAULT 300');
 ensureColumn('economy_mines_games', 'revision', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('economy_mines_games', 'board_size', 'INTEGER NOT NULL DEFAULT 20');
+ensureColumn('economy_mines_preferences', 'board_size', 'INTEGER NOT NULL DEFAULT 20');
 ensureColumn('tickets', 'claimed_by', 'TEXT');
 ensureColumn('tickets', 'created_at', 'TEXT DEFAULT CURRENT_TIMESTAMP');
 ensureColumn('tickets', 'claimed_at', 'TEXT');

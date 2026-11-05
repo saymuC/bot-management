@@ -8,7 +8,7 @@ const { getEconomyConfig, saveEconomyConfig } = require('../config/economy');
 const { canUseCommand, PERMISSION_DENIED_MESSAGE } = require('../utils/commandPermissions');
 const { logError } = require('../utils/observability');
 const mines = require('../utils/economy/mines/service');
-const { multiplier, payout, safePickCount, BOARD_SIZE } = require('../utils/economy/mines/engine');
+const { multiplier, payout, safeTileIncrement, safePickCount, BOARD_SIZE, MIN_BOARD_SIZE } = require('../utils/economy/mines/engine');
 
 const PREFIX = 'mines_';
 const CONFIG_PREFIX = 'eco_cfg_mines_';
@@ -30,7 +30,6 @@ function rememberPanelEditor(gameId, webhook, messageId, guild, userId) {
 }
 
 function settingsPanel(guild, userId) {
-  const config = getEconomyConfig(guild.id);
   const prefs = mines.getPreferences(guild.id, userId);
   const balance = mines.getBalance(guild.id, userId);
   const coin = currency(guild).icon;
@@ -40,13 +39,13 @@ function settingsPanel(guild, userId) {
       description: `Saldo disponível: ${coin} **${formatMoney(balance)} ${currency(guild).name}**\nEscolha a aposta e as minas para iniciar.`,
       fields: [
         { name: 'Aposta', value: `${formatMoney(prefs.bet)} ${currency(guild).name}`, inline: true },
-        { name: 'Minas', value: String(prefs.mine_count), inline: true },
-        { name: 'Tabuleiro', value: `${BOARD_SIZE} casas`, inline: true },
+      { name: 'Casas', value: String(prefs.board_size), inline: true },
+      { name: 'Minas', value: String(prefs.mine_count), inline: true },
       ],
       footer: `${getEconomyConfig(guild.id).mines.timeoutSeconds}s de inatividade · retome uma partida ativa com /mines`,
     })],
     components: [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`${PREFIX}settings`).setLabel('Aposta e minas').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`${PREFIX}settings`).setLabel('Casas, minas e aposta').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`${PREFIX}start`).setLabel('Iniciar').setEmoji(emoji(guild, 'eco_mines')).setStyle(ButtonStyle.Success),
     ).toJSON()],
   };
@@ -59,16 +58,20 @@ function renderGame(guild, game) {
   const lost = game.status === 'lost';
   const safePicks = finished && game.board ? safePickCount(game.board, game.revealed) : revealed.size;
   const board = game.board ?? [];
-  const activeMultiplier = multiplier(game.mine_count, safePicks, game.house_edge_bps);
-  const potential = safePicks ? payout(game.bet, game.mine_count, safePicks, game.house_edge_bps) : game.bet;
+  const activeMultiplier = multiplier(game.mine_count, safePicks, game.house_edge_bps, game.board_size);
+  const potential = safePicks ? payout(game.bet, game.mine_count, safePicks, game.house_edge_bps, game.board_size) : game.bet;
+  const nextIncrement = safePicks < game.board_size - game.mine_count
+    ? safeTileIncrement(game.bet, game.mine_count, safePicks + 1, game.house_edge_bps, game.board_size) : 0;
   let description = 'Selecione casas seguras; cada acerto aumenta o pagamento disponível.';
   if (won) description += `\n\n${emoji(guild, 'eco_mines_cashout')} Retirada concluída: **${formatMoney(game.payout)} ${currency(guild).name}**.`;
   else if (lost) description += `\n\n${emoji(guild, 'eco_mines')} Mina encontrada. A aposta foi perdida.`;
   else if (game.status === 'expired' || game.status === 'refunded') description += '\n\nPartida encerrada; a aposta foi devolvida.';
   const fields = game.status === 'active' ? [
     { name: 'Aposta', value: `${formatMoney(game.bet)} ${currency(guild).name}`, inline: true },
+    { name: 'Casas', value: String(game.board_size), inline: true },
     { name: 'Minas', value: String(game.mine_count), inline: true },
     { name: 'Multiplicador', value: `${activeMultiplier.toFixed(2)}x`, inline: true },
+    { name: 'Próxima casa segura', value: `${formatMoney(nextIncrement)} ${currency(guild).name}`, inline: true },
     { name: 'Ganho disponível', value: `${formatMoney(potential)} ${currency(guild).name}`, inline: true },
   ] : won ? [
     { name: 'Pagamento recebido', value: `${formatMoney(game.payout)} ${currency(guild).name}`, inline: true },
@@ -80,27 +83,35 @@ function renderGame(guild, game) {
   ];
 
   const rows = [];
-  for (let row = 0; row < 4; row += 1) {
+  const rowCount = Math.ceil(game.board_size / 5);
+  for (let row = 0; row < rowCount; row += 1) {
     const buttons = [];
     for (let col = 0; col < 5; col += 1) {
       const position = row * 5 + col;
+      if (position >= game.board_size) break;
       const isRevealed = revealed.has(position);
       const isMine = finished && board.includes(position);
       const style = isMine ? ButtonStyle.Danger : isRevealed ? ButtonStyle.Success : ButtonStyle.Secondary;
-      const button = new ButtonBuilder().setCustomId(`${PREFIX}reveal_${game.id}_${position}_${game.revision ?? 0}`).setLabel('Casa')
+      const revealedIndex = game.revealed.indexOf(position);
+      const safeOrdinal = revealedIndex < 0 ? 0 : game.revealed.slice(0, revealedIndex + 1)
+        .reduce((count, cell) => count + (!board.includes(cell) ? 1 : 0), 0);
+      const safeValue = isRevealed && !isMine ? safeTileIncrement(game.bet, game.mine_count, safeOrdinal, game.house_edge_bps, game.board_size) : 0;
+      const button = new ButtonBuilder().setCustomId(`${PREFIX}reveal_${game.id}_${position}_${game.revision ?? 0}`)
         .setStyle(style).setDisabled(finished || isRevealed);
       if (isMine) button.setEmoji(emoji(guild, 'eco_mines'));
-      else if (isRevealed) button.setEmoji(emoji(guild, 'eco_mines_safe'));
+      else if (isRevealed) {
+        button.setLabel(`+${formatMoney(safeValue)}`).setEmoji(emoji(guild, 'eco_mines_safe'));
+      }
+      else button.setEmoji(emoji(guild, 'eco_mines_hidden'));
       buttons.push(button);
     }
     rows.push(new ActionRowBuilder().addComponents(buttons).toJSON());
   }
-  rows.push(new ActionRowBuilder().addComponents(
-    finished
-      ? new ButtonBuilder().setCustomId(`${PREFIX}again`).setLabel('Jogar novamente').setEmoji(emoji(guild, 'eco_mines')).setStyle(ButtonStyle.Primary)
-      : new ButtonBuilder().setCustomId(`${PREFIX}cashout_${game.id}_${game.revision ?? 0}`).setLabel(`Retirar ${formatMoney(potential)}`)
-        .setEmoji(emoji(guild, 'eco_mines_cashout')).setStyle(ButtonStyle.Success).setDisabled(revealed.size === 0),
-  ).toJSON());
+  const controls = new ActionRowBuilder();
+  if (finished) controls.addComponents(new ButtonBuilder().setCustomId(`${PREFIX}home`).setLabel('Voltar ao início').setStyle(ButtonStyle.Primary));
+  else controls.addComponents(new ButtonBuilder().setCustomId(`${PREFIX}cashout_${game.id}_${game.revision ?? 0}`).setLabel(`Retirar ${formatMoney(potential)}`)
+    .setEmoji(emoji(guild, 'eco_mines_cashout')).setStyle(ButtonStyle.Success).setDisabled(revealed.size === 0));
+  rows.push(controls.toJSON());
   return { embeds: [baseEmbed({ title: `${emoji(guild, 'eco_mines')} Mines`, description, fields, footer: `Partida #${game.id}` })], components: rows };
 }
 
@@ -124,7 +135,9 @@ function settingsModal(guild, userId) {
   const modal = new ModalBuilder().setCustomId(`${PREFIX}submit_settings`).setTitle('Configurar Mines');
   modal.addComponents(new TextInputBuilder().setCustomId('bet').setLabel('Aposta em moedas')
     .setStyle(TextInputStyle.Short).setValue(String(current.bet)).setRequired(true));
-  modal.addComponents(new TextInputBuilder().setCustomId('mines').setLabel('Quantidade de minas')
+  modal.addComponents(new TextInputBuilder().setCustomId('boardSize').setLabel(`Número de casas (${MIN_BOARD_SIZE}–${BOARD_SIZE})`)
+    .setStyle(TextInputStyle.Short).setValue(String(current.board_size)).setRequired(true));
+  modal.addComponents(new TextInputBuilder().setCustomId('mines').setLabel(`Quantidade de minas (1–${current.board_size - 1})`)
     .setStyle(TextInputStyle.Short).setValue(String(current.mine_count)).setRequired(true));
   return modal;
 }
@@ -138,19 +151,22 @@ async function routeMinesInteraction(interaction) {
   if (action === 'submit_settings' && interaction.isModalSubmit()) {
     try {
       const bet = Number(interaction.fields.getTextInputValue('bet'));
+      const boardSize = Number(interaction.fields.getTextInputValue('boardSize'));
       const mineCount = Number(interaction.fields.getTextInputValue('mines'));
-      mines.setPreferences(interaction.guild.id, interaction.user.id, bet, mineCount);
+      mines.setPreferences(interaction.guild.id, interaction.user.id, bet, boardSize, mineCount);
       return interaction.reply({ ...settingsPanel(interaction.guild, interaction.user.id), flags: MessageFlags.Ephemeral });
     } catch (error) {
       return showInteractionError(interaction, error instanceof Error ? error.message : 'Configuração inválida.');
     }
   }
-  if (['start', 'again'].includes(action) && interaction.isButton()) {
+  if (action === 'home' && interaction.isButton()) return interaction.update(settingsPanel(interaction.guild, interaction.user.id));
+  if (action === 'start' && interaction.isButton()) {
     const alreadyAcknowledged = interaction.deferred || interaction.replied;
     let responseAttempted = false;
     try {
       const prefs = mines.getPreferences(interaction.guild.id, interaction.user.id);
-      const game = mines.createGame({ guildId: interaction.guild.id, userId: interaction.user.id, bet: prefs.bet, mineCount: prefs.mine_count });
+      const game = mines.createGame({ guildId: interaction.guild.id, userId: interaction.user.id, bet: prefs.bet,
+        boardSize: prefs.board_size, mineCount: prefs.mine_count });
       if (alreadyAcknowledged) {
         responseAttempted = true;
         const message = await interaction.followUp({ ...renderGame(interaction.guild, game), flags: MessageFlags.Ephemeral });
@@ -277,7 +293,7 @@ async function routeMinesConfig(interaction) {
     const modal = new ModalBuilder().setCustomId(`${CONFIG_PREFIX}submit_rules`).setTitle('Regras de Mines');
     for (const [id, label, value] of [
       ['minBet', 'Aposta mínima', config.minBet], ['maxBet', 'Aposta máxima', config.maxBet],
-      ['maxMines', 'Máximo de minas (1–8)', config.maxMines], ['houseEdgeBps', 'Vantagem em pontos-base', config.houseEdgeBps],
+      ['maxMines', `Limite global de minas (até ${BOARD_SIZE - 1})`, config.maxMines], ['houseEdgeBps', 'Vantagem em pontos-base', config.houseEdgeBps],
       ['timeoutSeconds', 'Expiração em segundos (60–3600)', config.timeoutSeconds],
     ]) modal.addComponents(new TextInputBuilder().setCustomId(String(id)).setLabel(String(label))
       .setStyle(TextInputStyle.Short).setValue(String(value)).setRequired(true));

@@ -1,7 +1,7 @@
 // @ts-check
 const { db } = require('../../../database/db');
 const { MAX_BALANCE, getEconomyConfig } = require('../../../config/economy');
-const { generateBoard, BOARD_SIZE, payout, validateGame } = require('./engine');
+const { generateBoard, BOARD_SIZE, MIN_BOARD_SIZE, payout, validateGame } = require('./engine');
 
 const balance = db.prepare('SELECT wallet FROM economy_accounts WHERE guild_id = ? AND user_id = ?');
 const active = db.prepare("SELECT * FROM economy_mines_games WHERE guild_id = ? AND user_id = ? AND status = 'active'");
@@ -14,15 +14,15 @@ const insertTransaction = db.prepare(`INSERT INTO economy_transactions
   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
 const reserved = db.prepare("SELECT COALESCE(SUM(reserved_payout), 0) AS total FROM economy_mines_games WHERE guild_id = ? AND user_id = ? AND status = 'active'");
 const insertGame = db.prepare(`INSERT INTO economy_mines_games
-  (guild_id, user_id, bet, mine_count, house_edge_bps, timeout_seconds, board, reserved_payout, created_at, updated_at, expires_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  (guild_id, user_id, bet, board_size, mine_count, house_edge_bps, timeout_seconds, board, reserved_payout, created_at, updated_at, expires_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 const updateGame = db.prepare(`UPDATE economy_mines_games SET revealed = ?, status = ?, payout = ?, updated_at = ?,
   expires_at = ?, finished_at = ?, revision = revision + 1 WHERE id = ? AND status = 'active'`);
 const insertMove = db.prepare('INSERT INTO economy_mines_moves (game_id, position, move_number, safe, created_at) VALUES (?, ?, ?, ?, ?)');
 const updateMessage = db.prepare('UPDATE economy_mines_games SET channel_id = ?, message_id = ? WHERE id = ? AND status = \'active\'');
-const preferences = db.prepare('SELECT bet, mine_count FROM economy_mines_preferences WHERE guild_id = ? AND user_id = ?');
-const savePreferences = db.prepare(`INSERT INTO economy_mines_preferences (guild_id, user_id, bet, mine_count) VALUES (?, ?, ?, ?)
-  ON CONFLICT(guild_id, user_id) DO UPDATE SET bet = excluded.bet, mine_count = excluded.mine_count`);
+const preferences = db.prepare('SELECT bet, board_size, mine_count FROM economy_mines_preferences WHERE guild_id = ? AND user_id = ?');
+const savePreferences = db.prepare(`INSERT INTO economy_mines_preferences (guild_id, user_id, bet, board_size, mine_count) VALUES (?, ?, ?, ?, ?)
+  ON CONFLICT(guild_id, user_id) DO UPDATE SET bet = excluded.bet, board_size = excluded.board_size, mine_count = excluded.mine_count`);
 const expiredGames = db.prepare("SELECT id, guild_id, user_id, channel_id, message_id FROM economy_mines_games WHERE status = 'active' AND expires_at <= ? ORDER BY expires_at");
 const activeGames = db.prepare("SELECT id, guild_id, user_id FROM economy_mines_games WHERE status = 'active'");
 
@@ -30,8 +30,11 @@ function getBalance(guildId, userId) { return balance.get(guildId, userId)?.wall
 function getPreferences(guildId, userId) {
   const config = getEconomyConfig(guildId).mines;
   const saved = preferences.get(guildId, userId);
-  return saved && saved.bet >= config.minBet && saved.bet <= config.maxBet && saved.mine_count <= config.maxMines
-    ? saved : { bet: config.minBet, mine_count: Math.min(3, config.maxMines) };
+  const boardSize = saved?.board_size ?? BOARD_SIZE;
+  return saved && saved.bet >= config.minBet && saved.bet <= config.maxBet &&
+    Number.isSafeInteger(boardSize) && boardSize >= MIN_BOARD_SIZE && boardSize <= BOARD_SIZE &&
+    Number.isSafeInteger(saved.mine_count) && saved.mine_count >= 1 && saved.mine_count <= Math.min(config.maxMines, boardSize - 1)
+    ? saved : { bet: config.minBet, board_size: BOARD_SIZE, mine_count: Math.min(3, config.maxMines, BOARD_SIZE - 1) };
 }
 function getActiveGame(guildId, userId) {
   const game = active.get(guildId, userId);
@@ -59,13 +62,24 @@ function attachActiveMessage(guildId, userId, channelId, messageId) {
   return game?.id ?? null;
 }
 
-function setPreferences(guildId, userId, bet, mineCount) {
+function setPreferences(guildId, userId, bet, boardSize, mineCount) {
   const config = getEconomyConfig(guildId);
   if (!Number.isSafeInteger(bet) || bet < config.mines.minBet || bet > config.mines.maxBet) throw new RangeError(`A aposta deve estar entre ${config.mines.minBet} e ${config.mines.maxBet}.`);
-  if (!Number.isSafeInteger(mineCount) || mineCount < 1 || mineCount > config.mines.maxMines) throw new RangeError(`Escolha entre 1 e ${config.mines.maxMines} minas.`);
-  if (payout(bet, mineCount, BOARD_SIZE - mineCount, config.mines.houseEdgeBps) > MAX_BALANCE) throw new RangeError('Esse valor pode ultrapassar o limite de crédito.');
-  savePreferences.run(guildId, userId, bet, mineCount);
-  return { bet, mine_count: mineCount };
+  if (!Number.isSafeInteger(boardSize) || boardSize < MIN_BOARD_SIZE || boardSize > BOARD_SIZE) throw new RangeError(`Escolha entre ${MIN_BOARD_SIZE} e ${BOARD_SIZE} casas.`);
+  if (!Number.isSafeInteger(mineCount) || mineCount < 1 || mineCount > boardSize - 1) {
+    throw new RangeError(`Escolha entre 1 e ${boardSize - 1} minas para esse tabuleiro.`);
+  }
+  if (mineCount > config.mines.maxMines) throw new RangeError(`O limite atual é ${config.mines.maxMines} minas.`);
+  const maxSafePicks = boardSize - mineCount;
+  if (payout(bet, mineCount, maxSafePicks, config.mines.houseEdgeBps, boardSize) > MAX_BALANCE) {
+    const requiredMines = Array.from({ length: maxSafePicks - 1 }, (_, index) => mineCount + index + 1)
+      .find((count) => payout(bet, count, boardSize - count, config.mines.houseEdgeBps, boardSize) <= MAX_BALANCE);
+    throw new RangeError(requiredMines
+      ? `Esse pagamento excede o limite da carteira. Com ${boardSize} casas e aposta de ${bet}, use pelo menos ${requiredMines} minas.`
+      : 'Esse pagamento excede o limite da carteira; reduza a aposta.');
+  }
+  savePreferences.run(guildId, userId, bet, boardSize, mineCount);
+  return { bet, board_size: boardSize, mine_count: mineCount };
 }
 
 function publicGame(game, revealBoard = false) {
@@ -88,18 +102,26 @@ function closeGame(game, status, now, payoutAmount = 0, type = null) {
   return gameById.get(game.id, game.guild_id);
 }
 
-function createGame({ guildId, userId, bet, mineCount, now = Date.now(), randomBoard = generateBoard }) {
+function createGame({ guildId, userId, bet, boardSize = BOARD_SIZE, mineCount, now = Date.now(), randomBoard = generateBoard }) {
   if (!guildId || !userId || !Number.isSafeInteger(now) || now < 0) throw new Error('Dados da partida inválidos.');
   const config = getEconomyConfig(guildId);
   if (!config.enabled || !config.mines.enabled) throw new Error('Mines está desativado neste servidor.');
   if (!Number.isSafeInteger(bet) || bet < config.mines.minBet || bet > config.mines.maxBet) throw new RangeError('Aposta fora dos limites configurados.');
-  if (!Number.isSafeInteger(mineCount) || mineCount < 1 || mineCount > config.mines.maxMines || mineCount >= BOARD_SIZE) throw new RangeError('Quantidade de minas inválida.');
-  validateGame(mineCount, config.mines.houseEdgeBps);
-  const board = randomBoard(BOARD_SIZE, mineCount);
+  if (!Number.isSafeInteger(boardSize) || boardSize < MIN_BOARD_SIZE || boardSize > BOARD_SIZE) throw new RangeError(`Escolha entre ${MIN_BOARD_SIZE} e ${BOARD_SIZE} casas.`);
+   if (!Number.isSafeInteger(mineCount) || mineCount < 1 || mineCount > boardSize - 1) throw new RangeError('Quantidade de minas inválida para esse tabuleiro.');
+  validateGame(mineCount, config.mines.houseEdgeBps, boardSize);
+  const board = randomBoard(boardSize, mineCount);
   if (!Array.isArray(board) || board.length !== mineCount || new Set(board).size !== mineCount ||
-      board.some((cell) => !Number.isSafeInteger(cell) || cell < 0 || cell >= BOARD_SIZE)) throw new Error('Tabuleiro gerado inválido.');
-  const maxPayout = payout(bet, mineCount, BOARD_SIZE - mineCount, config.mines.houseEdgeBps);
-  if (maxPayout > MAX_BALANCE) throw new RangeError('Essa aposta pode gerar pagamento acima do limite da carteira. Reduza a aposta ou a quantidade de minas.');
+      board.some((cell) => !Number.isSafeInteger(cell) || cell < 0 || cell >= boardSize)) throw new Error('Tabuleiro gerado inválido.');
+  const maxSafePicks = boardSize - mineCount;
+  const maxPayout = payout(bet, mineCount, maxSafePicks, config.mines.houseEdgeBps, boardSize);
+  if (maxPayout > MAX_BALANCE) {
+    const requiredMines = Array.from({ length: maxSafePicks - 1 }, (_, index) => mineCount + index + 1)
+      .find((count) => payout(bet, count, boardSize - count, config.mines.houseEdgeBps, boardSize) <= MAX_BALANCE);
+    throw new RangeError(requiredMines
+      ? `Essa aposta excede o limite de pagamento. Com ${boardSize} casas, use pelo menos ${requiredMines} minas.`
+      : 'Essa aposta excede o limite de pagamento; reduza a aposta.');
+  }
 
   return db.transaction(() => {
     if (active.get(guildId, userId)) throw new Error('Você já tem uma partida ativa.');
@@ -107,21 +129,22 @@ function createGame({ guildId, userId, bet, mineCount, now = Date.now(), randomB
     if (previous < bet) throw new RangeError('Saldo insuficiente para essa aposta.');
     const reservedTotal = reserved.get(guildId, userId).total;
     if (MAX_BALANCE - (previous - bet) - reservedTotal < maxPayout) throw new RangeError('Não há capacidade de crédito suficiente para reservar o pagamento máximo desta partida.');
-    const id = insertGame.run(guildId, userId, bet, mineCount, config.mines.houseEdgeBps, config.mines.timeoutSeconds, JSON.stringify(board), maxPayout,
+    const id = insertGame.run(guildId, userId, bet, boardSize, mineCount, config.mines.houseEdgeBps, config.mines.timeoutSeconds, JSON.stringify(board), maxPayout,
       now, now, now + config.mines.timeoutSeconds * 1000).lastInsertRowid;
     insertBalance.run(guildId, userId, previous - bet);
     insertTransaction.run(guildId, userId, 'mines_bet', -bet, previous, previous - bet, JSON.stringify({ gameId: id }), `mines:${id}:bet`);
-    savePreferences.run(guildId, userId, bet, mineCount);
+    savePreferences.run(guildId, userId, bet, boardSize, mineCount);
     return publicGame(gameById.get(id, guildId));
   }).immediate();
 }
 
 function revealCell({ guildId, userId, gameId, position, revision, now = Date.now() }) {
-  if (!Number.isSafeInteger(gameId) || !Number.isSafeInteger(position) || position < 0 || position >= BOARD_SIZE ||
+  if (!Number.isSafeInteger(gameId) || !Number.isSafeInteger(position) || position < 0 ||
       !Number.isSafeInteger(revision) || revision < 0) throw new Error('Jogada inválida.');
   return db.transaction(() => {
     const game = gameById.get(gameId, guildId);
     if (!game || game.user_id !== userId) throw new Error('Partida não encontrada ou não pertence a você.');
+    if (position >= game.board_size) throw new Error('Casa fora do tabuleiro.');
     if (game.status !== 'active') return publicGame(game, true);
     if (now >= game.expires_at) return publicGame(closeGame(game, 'expired', now, game.bet, 'mines_refund'), true);
     if (revision !== game.revision) throw new Error('Este painel ficou desatualizado. A partida foi atualizada em outro painel.');
@@ -136,8 +159,8 @@ function revealCell({ guildId, userId, gameId, position, revision, now = Date.no
       const result = closeGame(next, 'lost', now, 0);
       return publicGame({ ...result, board: game.board }, true);
     }
-    if (revealed.length === BOARD_SIZE - game.mine_count) {
-      const prize = payout(game.bet, game.mine_count, revealed.length, game.house_edge_bps);
+    if (revealed.length === game.board_size - game.mine_count) {
+      const prize = payout(game.bet, game.mine_count, revealed.length, game.house_edge_bps, game.board_size);
       const result = closeGame(next, 'won', now, prize, 'mines_payout');
       return publicGame({ ...result, board: game.board }, true);
     }
@@ -156,7 +179,7 @@ function cashOut({ guildId, userId, gameId, revision, now = Date.now() }) {
     if (revision !== game.revision) throw new Error('Este painel ficou desatualizado. A partida foi atualizada em outro painel.');
     const revealed = JSON.parse(game.revealed);
     if (revealed.length === 0) throw new Error('Revele ao menos uma casa segura antes de retirar.');
-    const prize = payout(game.bet, game.mine_count, revealed.length, game.house_edge_bps);
+    const prize = payout(game.bet, game.mine_count, revealed.length, game.house_edge_bps, game.board_size);
     const result = closeGame(game, 'won', now, prize, 'mines_payout');
     return publicGame({ ...result, board: game.board }, true);
   }).immediate();

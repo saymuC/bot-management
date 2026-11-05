@@ -123,6 +123,7 @@ const REGISTRY = Object.freeze({
   eco_crime: { label: 'Crime', default: '🚨', category: 'economy', usage: '/crime' },
   eco_mines: { label: 'Mines', default: '💣', category: 'economy', usage: '/mines' },
   eco_mines_safe: { label: 'Casa segura', default: '💎', category: 'economy', usage: 'Casas reveladas no Mines' },
+  eco_mines_hidden: { label: 'Casa fechada', default: '⬜', category: 'economy', usage: 'Casa ainda não revelada no Mines' },
   eco_mines_cashout: { label: 'Retirada', default: '💰', category: 'economy', usage: 'Retirar ganhos no Mines' },
   eco_police: { label: 'Polícia', default: '🚔', category: 'economy', usage: '/crime quando preso' },
   eco_cafe: { label: 'Café', default: '☕', category: 'economy_items', usage: 'Item Café e emprego Barista' },

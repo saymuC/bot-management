@@ -5,7 +5,7 @@ const WORK = Object.freeze({ min: 150, max: 300, cooldownMs: 30 * 60 * 1000 });
 const { getGuildConfig, setGuildConfig } = require('../database/db');
 const { db } = require('../database/db');
 const { BOARD_SIZE, payout } = require('../utils/economy/mines/engine');
-const MINES_DEFAULT = Object.freeze({ enabled: true, minBet: 50, maxBet: 8_000, maxMines: 8, houseEdgeBps: 300, timeoutSeconds: 300 });
+const MINES_DEFAULT = Object.freeze({ enabled: true, minBet: 50, maxBet: 1_000, maxMines: 19, houseEdgeBps: 300, timeoutSeconds: 300 });
 /** @typedef {{ enabled: boolean, minBet: number, maxBet: number, maxMines: number, houseEdgeBps: number, timeoutSeconds: number }} MinesConfig */
 /** @typedef {{ enabled: boolean, dailyMin: number, dailyMax: number, workMin: number, workMax: number, workCooldownMinutes: number, currencyName: string, currencyEmoji: string|null, mines: MinesConfig }} EconomyConfig */
 const DEFAULT = Object.freeze({ enabled: true, dailyMin: DAILY.min, dailyMax: DAILY.max,
@@ -36,7 +36,7 @@ function getEconomyConfig(guildId) {
     enabled: typeof mines.enabled === 'boolean' ? mines.enabled : MINES_DEFAULT.enabled,
     minBet: Number.isSafeInteger(mines.minBet) && mines.minBet > 0 && mines.minBet <= MAX_BALANCE ? mines.minBet : MINES_DEFAULT.minBet,
     maxBet: Number.isSafeInteger(mines.maxBet) && mines.maxBet > 0 && mines.maxBet <= MAX_BALANCE ? mines.maxBet : MINES_DEFAULT.maxBet,
-    maxMines: Number.isSafeInteger(mines.maxMines) && mines.maxMines >= 1 && mines.maxMines <= 8 ? mines.maxMines : MINES_DEFAULT.maxMines,
+    maxMines: Number.isSafeInteger(mines.maxMines) && mines.maxMines >= 1 && mines.maxMines <= BOARD_SIZE - 1 ? mines.maxMines : MINES_DEFAULT.maxMines,
     houseEdgeBps: Number.isSafeInteger(mines.houseEdgeBps) && mines.houseEdgeBps >= 0 && mines.houseEdgeBps <= 9999 ? mines.houseEdgeBps : MINES_DEFAULT.houseEdgeBps,
     timeoutSeconds: Number.isSafeInteger(mines.timeoutSeconds) && mines.timeoutSeconds >= 60 && mines.timeoutSeconds <= 3600 ? mines.timeoutSeconds : MINES_DEFAULT.timeoutSeconds,
   };
@@ -72,19 +72,20 @@ function saveEconomyConfig(guildId, changes) {
     const mines = { ...next.mines, ...changes.mines };
     if (typeof mines.enabled !== 'boolean' || !Number.isSafeInteger(mines.minBet) || !Number.isSafeInteger(mines.maxBet) ||
         mines.minBet < 1 || mines.minBet > mines.maxBet || mines.maxBet > MAX_BALANCE ||
-        !Number.isSafeInteger(mines.maxMines) || mines.maxMines < 1 || mines.maxMines > 8 ||
+        !Number.isSafeInteger(mines.maxMines) || mines.maxMines < 1 || mines.maxMines > BOARD_SIZE - 1 ||
         !Number.isSafeInteger(mines.houseEdgeBps) || mines.houseEdgeBps < 0 || mines.houseEdgeBps > 9999 ||
         !Number.isSafeInteger(mines.timeoutSeconds) || mines.timeoutSeconds < 60 || mines.timeoutSeconds > 3600) {
       throw new Error('Configuração de Mines fora dos limites permitidos.');
     }
     next.mines = mines;
   }
-  if (next.mines.maxMines > Math.min(8, Math.floor(BOARD_SIZE - 1))) throw new Error('Quantidade máxima de minas inválida.');
-  for (let mines = 1; mines <= next.mines.maxMines; mines += 1) {
-    if (payout(next.mines.maxBet, mines, BOARD_SIZE - mines, next.mines.houseEdgeBps) > MAX_BALANCE) {
-      throw new Error('A configuração permite pagamentos acima do limite da carteira.');
-    }
-  }
+  if (next.mines.maxMines > BOARD_SIZE - 1) throw new Error('Quantidade máxima de minas inválida.');
+  const payoutCap = Math.min(MAX_BALANCE, ...Array.from({ length: BOARD_SIZE - 3 }, (_, i) => {
+    const size = i + 4;
+    const mineCount = Math.min(next.mines.maxMines, size - 1);
+    return Math.floor(MAX_BALANCE / payout(1, mineCount, size - mineCount, next.mines.houseEdgeBps, size));
+  }));
+  if (next.mines.maxBet > payoutCap) throw new Error(`A aposta máxima precisa ser de até ${payoutCap} para garantir o pagamento integral.`);
   const save = () => {
     setGuildConfig(guildId, 'economy_config', JSON.stringify(next));
     if ((config.enabled && !next.enabled) || (config.mines.enabled && !next.mines.enabled)) {

@@ -6,7 +6,7 @@ const path = require('node:path');
 const { db, setGuildConfig } = require('../database/db');
 const { changeBalance } = require('../utils/economy/service');
 const mines = require('../utils/economy/mines/service');
-const { BOARD_SIZE, generateBoard, survivalProbability, multiplier, payout } = require('../utils/economy/mines/engine');
+const { BOARD_SIZE, generateBoard, survivalProbability, multiplier, payout, safeTileIncrement } = require('../utils/economy/mines/engine');
 const { getEconomyConfig, saveEconomyConfig, MAX_BALANCE } = require('../config/economy');
 const { renderGame, settingsPanel, minesConfigPanel, routeMinesConfig } = require('../handlers/minesHandler');
 const { REGISTRY } = require('../utils/emojis');
@@ -33,6 +33,11 @@ test('engine gera minas únicas, calcula probabilidades e arredonda apenas pagam
   assert.equal(survivalProbability(3, 1), 0.85);
   assert.ok(Math.abs(multiplier(3, 1) - 0.97 / 0.85) < 1e-12);
   assert.equal(payout(1000, 3, 1), 1141);
+  assert.equal(safeTileIncrement(100, 3, 1, 300, 20), payout(100, 3, 1, 300, 20) - 100);
+  assert.equal(safeTileIncrement(100, 3, 2, 300, 20), payout(100, 3, 2) - payout(100, 3, 1));
+  assert.equal(generateBoard(4, 3).length, 3);
+  assert.throws(() => generateBoard(4, 4), RangeError);
+  assert.throws(() => generateBoard(3, 1), RangeError);
   assert.equal(require('../utils/economy/mines/engine').safePickCount([0, 1, 2], [3, 0]), 1);
   assert.equal(new Set(generateBoard(20, 8)).size, 8);
   assert.throws(() => generateBoard(20, 20), RangeError);
@@ -59,7 +64,7 @@ test('aposta e saque são atômicos, idempotentes e registrados no extrato', () 
   assert.equal(mines.getBalance(GUILD, USER), 4900);
   assert.equal(game.board, undefined);
   assert.equal(game.reserved_payout, 1940);
-  assert.equal(mines.getPreferences(GUILD, USER).bet, 100);
+  assert.deepEqual(mines.getPreferences(GUILD, USER), { bet: 100, board_size: 20, mine_count: 1 });
   const afterPick = mines.revealCell({ guildId: GUILD, userId: USER, gameId: game.id, position: 0, revision: 0, now: now + 1 });
   assert.deepEqual(afterPick.revealed, [0]);
   assert.equal(afterPick.board, undefined);
@@ -120,7 +125,7 @@ test('a partida congela timeout e configurações subsequentes não alteram sua 
 test('painel e tabuleiro cabem nos limites Discord e ocultam minas durante jogo ativo', () => {
   cleanup();
   changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: 1000, source: 'test' });
-  for (const key of ['eco_mines', 'eco_mines_safe', 'eco_mines_cashout']) assert.ok(REGISTRY[key]);
+  for (const key of ['eco_mines', 'eco_mines_hidden', 'eco_mines_safe', 'eco_mines_cashout']) assert.ok(REGISTRY[key]);
   const guild = { id: GUILD, name: 'Mines test' };
   const prefs = settingsPanel(guild, USER);
   assert.equal(prefs.components[0].components.length, 2);
@@ -132,6 +137,34 @@ test('painel e tabuleiro cabem nos limites Discord e ocultam minas durante jogo 
   assert.ok(!payload.components.some((row) => row.components.some((button) => button.emoji?.name === '💣')));
   assert.ok(!JSON.stringify(payload).includes('2,10,19'));
   assert.equal(minesConfigPanel(guild).components.length, 1);
+});
+
+test('preferências persistem tamanho do tabuleiro e limitam bombas por casas', () => {
+  cleanup();
+  setGuildConfig(GUILD, 'economy_config', JSON.stringify({ mines: { maxBet: 100, maxMines: 19 } }));
+  changeBalance({ guildId: GUILD, userId: USER, operation: 'set', amount: 1000, source: 'test' });
+  const saved = mines.setPreferences(GUILD, USER, 100, 4, 3);
+  assert.deepEqual(saved, { bet: 100, board_size: 4, mine_count: 3 });
+  assert.deepEqual(mines.getPreferences(GUILD, USER), saved);
+  const game = mines.createGame({ guildId: GUILD, userId: USER, bet: saved.bet, boardSize: saved.board_size, mineCount: saved.mine_count,
+    now, randomBoard: () => [0, 1, 2] });
+  assert.equal(game.board_size, 4);
+  assert.throws(() => mines.setPreferences(GUILD, USER, 100, 4, 4), /Escolha entre 1 e 3/);
+  assert.throws(() => mines.setPreferences(GUILD, USER, 100, 3, 1), /Escolha entre 4 e 20/);
+  const { renderGame } = require('../handlers/minesHandler');
+  const payload = renderGame({ id: GUILD, name: 'Mines test' }, game);
+  assert.equal(payload.components.length, 2);
+  assert.equal(payload.components[0].components.length, 4);
+  assert.equal(payload.components[1].components.length, 1);
+  assert.equal(payload.components[0].components[0].emoji.name, '⬜');
+  const revealed = mines.revealCell({ guildId: GUILD, userId: USER, gameId: game.id, position: 3, revision: 0, now: now + 1 });
+  const revealedPayload = renderGame({ id: GUILD, name: 'Mines test' }, revealed);
+  assert.equal(revealedPayload.components[0].components[3].label, '+14');
+  assert.equal(revealedPayload.components[0].components[3].emoji.name, '💎');
+  const finished = mines.revealCell({ guildId: GUILD, userId: USER, gameId: game.id, position: 0, revision: 1, now: now + 2 });
+  const finalPayload = renderGame({ id: GUILD, name: 'Mines test' }, finished);
+  assert.equal(finalPayload.components.at(-1).components[0].label, 'Voltar ao início');
+  assert.equal(finalPayload.components[0].components[0].emoji.name, '💣');
 });
 
 test('controle administrativo do Mines respeita permissões e reembolsa ao desativar', async () => {
